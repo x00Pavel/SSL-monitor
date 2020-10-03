@@ -2,12 +2,13 @@ CFLAGS= -Wall -Wextra
 MODULES=sslsniff.c functions.c
 
 make:
-	gcc $(CFLAGS) $(MODULES) -o sslsniff -lpcap
-	make run
+	gcc $(CFLAGS) $(MODULES) -o sslsniff -lpcap -lpthread
 
 clean:
 	rm sslsniff
 
 run:
-	./sslsniff -i iface -r test.pcapng
+	./sslsniff -i wlp2s0 -r test.pcapng
 
+run_s:
+	./sslsniff -r test_short.pcapng
