@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
                     return rc;
                 }
                 logger(2, "Interface is set");
-                pthread_create(&tid_iface, NULL, start_listen, optarg);
+                // pthread_create(&tid_iface, NULL, start_listen, optarg);
                 break;
             case 'r':
                 if (optarg == NULL) {
@@ -43,7 +43,8 @@ int main(int argc, char *argv[]) {
                     return rc;
                 }
                 logger(2, "File is set");
-                pthread_create(&tid_file, NULL, process_file, optarg);
+                process_file(optarg);
+                // pthread_create(&tid_file, NULL, process_file, optarg);
                 break;
             default:
                 printf("Argument for %c is ignored", c);
