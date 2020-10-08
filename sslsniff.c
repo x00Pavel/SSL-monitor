@@ -13,8 +13,8 @@ int main(int argc, char *argv[]) {
     logger(2, "Program started");
 
     int c, rc = 0;
-    pthread_t tid_file = NULL; 
-    pthread_t tid_iface = NULL;
+    pthread_t *tid_file = NULL; 
+    pthread_t *tid_iface = NULL;
 
     // Process input arguments
     while ((c = getopt(argc, argv, "r:i:")) != -1) {
@@ -53,10 +53,10 @@ int main(int argc, char *argv[]) {
     }
     if (tid_file != NULL){
         printf("Start her\n");
-        pthread_join(tid_file, NULL);
+        pthread_join(*tid_file, NULL);
     }
     if (tid_iface != NULL){
-        pthread_join(tid_iface, NULL);
+        pthread_join(*tid_iface, NULL);
 
     }
     return 0;

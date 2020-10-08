@@ -37,6 +37,7 @@ typedef struct {
     // char source_ip[INET_ADDRSTRLEN], dest_ip[INET_ADDRSTRLEN];
     u_int src_port, dst_port;
     struct timeval time_stamp;
+    time_t duration;
     char *sni;
     u_int packet_count;
     u_int bytes;
@@ -45,7 +46,7 @@ typedef struct {
 struct {
     int max_size;
     int current_size;
-    tls_connection *connections[];
+    tls_connection *connections;
 } list_of_connections;
 
 // tls_connection connections[SIZE];
@@ -84,12 +85,14 @@ void process_tls(u_char *payload) {
     uint8_t *content_type = payload;
     char len_hex[5];
     u_int data_size;
-    
+    tls_connection *pp = &list_of_connections.connections[list_of_connections.current_size - 1];
+
     sprintf(len_hex, "%02x%02x",
         *(content_type + 3),
         *(content_type + 4));
     sscanf(len_hex, "%04x", &data_size);
-    list_of_connections.connections[list_of_connections.current_size - 1]->bytes += data_size;\
+    
+    pp->bytes += data_size;
 
     if (*content_type == 22){
         uint8_t *handshake_type = content_type + 5;
@@ -100,7 +103,6 @@ void process_tls(u_char *payload) {
             session_id_len + *session_id_len + 3 + cipher_suites_length;
         
         extention ext;
-        char *sni;
         unsigned int sni_length;
 
         // Get size of all extansions
@@ -122,12 +124,12 @@ void process_tls(u_char *payload) {
                 sprintf(ext.ext_len_hex, "%02x%02x", *(i + 2), *(i + 3));
                 sscanf(ext.ext_len_hex, "%04x", &ext.ext_len);
                 if (ext.ext_type == 0) {  // 0 - Client hello
-
                     sprintf(len_hex, "%02x%02x", *(i + 7), *(i + 8));
                     sscanf(len_hex, "%04x", &sni_length);
-                    printf("HER MA FUCKA\n");
-                    list_of_connections.connections[list_of_connections.current_size - 1]->sni = (char *)malloc(sni_length + 1);
-                    strncpy(list_of_connections.connections[list_of_connections.current_size - 1]->sni, (const char *)i + 9, sni_length);
+                    tls_connection *pp = &list_of_connections.connections[list_of_connections.current_size - 1];
+                    pp->sni = (char *)malloc(sni_length + 1);
+                    snprintf(pp->sni, sni_length, "%s\n", (char *)i + 9);
+                    // strncpy(pp->sni, (const char *)i + 9, sni_length);
                 }
             }
         }
@@ -187,12 +189,9 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
     const struct iphdr *ip_header;
     const struct tcphdr *tcp_header;
     char source_ip[INET_ADDRSTRLEN], dest_ip[INET_ADDRSTRLEN];
-    u_int src_port, dst_port;
+    u_int src_port;
     u_char *data;
-    struct timeval timestamp = pkt_hdr->ts;
-    // struct tm *info = localtime(&timestamp.tv_sec);
-    // char tmp[80];
-    (void)dst_port;
+
     (void)userData;
 
     logger(2, "Processing next packet");
@@ -211,35 +210,41 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
         tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) +
                                        sizeof(struct iphdr));
         src_port = ntohs(tcp_header->source);
-        dst_port = ntohs(tcp_header->dest);
         tls_connection *conn;
         int index = -1;
         for (int i = 0; i < list_of_connections.current_size; i++){
-            conn = list_of_connections.connections[i];
-            if (conn->src_ip == ip_header->saddr && 
+            conn = &list_of_connections.connections[i];
+            if ((conn->src_ip == ip_header->saddr && 
                 conn->dst_ip == ip_header->daddr &&
                 conn->src_port == tcp_header->source &&
-                conn->dst_port == tcp_header->dest){
+                conn->dst_port == tcp_header->dest) ||
+                (conn->src_ip == ip_header->daddr &&
+                conn->dst_ip == ip_header->saddr &&
+                conn->src_port == tcp_header->dest &&
+                conn->dst_port == tcp_header->source)){
                 index = i;
                 break;
             }
         }
         if (index != -1){
-            list_of_connections.connections[index]->packet_count++;
+            tls_connection *pp = &list_of_connections.connections[index];
+            pp->packet_count++;
+            pp->duration = {pkt_hdr->ts.tv_sec - pp->time_stamp.tv_sec, pkt_hdr->ts.tv_usec - pp->time_stamp.tv_usec};
         }
         else{
-            tls_connection new_conn;
-            new_conn.dst_ip = ip_header->daddr;
-            new_conn.src_ip = ip_header->saddr;
-            new_conn.src_port = tcp_header->source;
-            new_conn.dst_port = tcp_header->dest;
-            new_conn.sni = NULL;
-            new_conn.time_stamp = pkt_hdr->ts;
-            new_conn.packet_count = 1;
-            new_conn.bytes = 0;
-            list_of_connections.connections[list_of_connections.current_size] = &new_conn;
+            tls_connection *new_conn = malloc(sizeof(tls_connection));
+            new_conn->dst_ip = ip_header->daddr;
+            new_conn->src_ip = ip_header->saddr;
+            new_conn->src_port = tcp_header->source;
+            new_conn->dst_port = tcp_header->dest;
+            new_conn->sni = NULL;
+            new_conn->time_stamp = pkt_hdr->ts;
+            new_conn->packet_count = 1;
+            new_conn->bytes = 0;
+            new_conn->duration = 0;
+            list_of_connections.connections[list_of_connections.current_size] = *new_conn;
             if (list_of_connections.current_size + 1 == list_of_connections.current_size){
-                *(list_of_connections.connections) = realloc(*(list_of_connections.connections), sizeof(tls_connection*) * SIZE);
+                list_of_connections.connections = realloc(list_of_connections.connections, sizeof(tls_connection) * SIZE);
             }
             list_of_connections.current_size++;
         }
@@ -298,13 +303,14 @@ void *process_file(char *file) {
         logger(1, err_buff);
     }
     if (pcap_compile(fp, &prog,
-                     "tcp port 443 and ("
-                     "(tcp[((tcp[12] & 0xf0) >> 2)] = 0x16) "
-                     "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x17) "
-                     "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x02) "
-                     "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x15) "
-                     "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x18) "
-                     "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x14))",
+                    "tcp port 443",
+                    //  "tcp port 443 and ("
+                    //  "(tcp[((tcp[12] & 0xf0) >> 2)] = 0x16) "
+                    //  "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x17) "
+                    //  "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x02) "
+                    //  "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x15) "
+                    //  "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x18) "
+                    //  "or (tcp[((tcp[12] & 0xf0) >> 2)] = 0x14))",
                      0, PCAP_NETMASK_UNKNOWN) == -1) {
         logger(1, "Filter can't be created");
         logger(1, pcap_geterr(fp));
@@ -314,24 +320,36 @@ void *process_file(char *file) {
         logger(1, err_buff);
     }
     logger(2, "Start processing packets");
-    *(list_of_connections.connections) = (tls_connection *)malloc(SIZE * sizeof(tls_connection *));
+    list_of_connections.connections = (tls_connection *)malloc(SIZE * sizeof(tls_connection));
     list_of_connections.max_size = SIZE;
     list_of_connections.current_size = 0;
     if (pcap_loop(fp, 0, packet_handler, NULL) < 0) {
         logger(1, pcap_geterr(fp));
     }
+
+    // Print all aggregated packages
     tls_connection *conn; 
     char source_ip[INET_ADDRSTRLEN], dest_ip[INET_ADDRSTRLEN];
     char tmp[80];
     struct tm *info;
-    printf("HERE\n");
+
     for (int i = 0; i < list_of_connections.current_size; i++){
-        conn = list_of_connections.connections[i];
+        conn = &list_of_connections.connections[i];
         info = localtime(&conn->time_stamp.tv_sec);
-        strftime(tmp, 80, "%Y-%m-%d\n%X", info);
+        strftime(tmp, 80, "%Y-%m-%d %X", info);
         inet_ntop(AF_INET, &(conn->src_ip), source_ip, INET_ADDRSTRLEN);
         inet_ntop(AF_INET, &(conn->dst_ip), dest_ip, INET_ADDRSTRLEN);
-        fprintf(stdout, "Timestamp: %s.%ld,\nSource IP: %s,\nSource port: %d,\nDestination IP: %s,\nSNI: %s,\nbytes: %d,\npackets:%d\n", 
+        fprintf(stdout, "------------------------------------\n"
+                        "               %d                   \n"
+                        "Timestamp: %s.%ld\n"
+                        "Source IP: %s,\n"
+                        "Source port: %d,\n"
+                        "Destination IP: %s,\n"
+                        "SNI: %s\n"
+                        "Bytes: %d,\n"
+                        "Packets:%d\n"
+                        "Duration: %d\n", 
+            i + 1,
             tmp, 
             conn->time_stamp.tv_usec,
             source_ip, 
@@ -339,7 +357,8 @@ void *process_file(char *file) {
             dest_ip, 
             conn->sni, 
             conn->bytes, 
-            conn->packet_count);
+            conn->packet_count,
+            conn->duration);
         free(conn->sni);
     }
     free(list_of_connections.connections);
