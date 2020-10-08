@@ -45,7 +45,7 @@ typedef struct {
 struct {
     int max_size;
     int current_size;
-    tls_connection *connections;
+    tls_connection *connections[];
 } list_of_connections;
 
 // tls_connection connections[SIZE];
@@ -89,7 +89,7 @@ void process_tls(u_char *payload) {
         *(content_type + 3),
         *(content_type + 4));
     sscanf(len_hex, "%04x", &data_size);
-    list_of_connections.connections[list_of_connections.current_size - 1].bytes += data_size;\
+    list_of_connections.connections[list_of_connections.current_size - 1]->bytes += data_size;\
 
     if (*content_type == 22){
         uint8_t *handshake_type = content_type + 5;
@@ -126,8 +126,8 @@ void process_tls(u_char *payload) {
                     sprintf(len_hex, "%02x%02x", *(i + 7), *(i + 8));
                     sscanf(len_hex, "%04x", &sni_length);
                     printf("HER MA FUCKA\n");
-                    list_of_connections.connections[list_of_connections.current_size - 1].sni = (char *)malloc(sni_length + 1);
-                    strncpy(list_of_connections.connections[list_of_connections.current_size - 1].sni, (const char *)i + 9, sni_length);
+                    list_of_connections.connections[list_of_connections.current_size - 1]->sni = (char *)malloc(sni_length + 1);
+                    strncpy(list_of_connections.connections[list_of_connections.current_size - 1]->sni, (const char *)i + 9, sni_length);
                 }
             }
         }
@@ -212,20 +212,20 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
                                        sizeof(struct iphdr));
         src_port = ntohs(tcp_header->source);
         dst_port = ntohs(tcp_header->dest);
-        tls_connection conn;
+        tls_connection *conn;
         int index = -1;
         for (int i = 0; i < list_of_connections.current_size; i++){
             conn = list_of_connections.connections[i];
-            if (conn.src_ip == ip_header->saddr && 
-                conn.dst_ip == ip_header->daddr &&
-                conn.src_port == tcp_header->source &&
-                conn.dst_port == tcp_header->dest){
+            if (conn->src_ip == ip_header->saddr && 
+                conn->dst_ip == ip_header->daddr &&
+                conn->src_port == tcp_header->source &&
+                conn->dst_port == tcp_header->dest){
                 index = i;
                 break;
             }
         }
         if (index != -1){
-            list_of_connections.connections[index].packet_count++;
+            list_of_connections.connections[index]->packet_count++;
         }
         else{
             tls_connection new_conn;
@@ -237,9 +237,9 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
             new_conn.time_stamp = pkt_hdr->ts;
             new_conn.packet_count = 1;
             new_conn.bytes = 0;
-            list_of_connections.connections[list_of_connections.current_size] = new_conn;
+            list_of_connections.connections[list_of_connections.current_size] = &new_conn;
             if (list_of_connections.current_size + 1 == list_of_connections.current_size){
-                list_of_connections.connections = realloc(list_of_connections.connections, sizeof(tls_connection) * SIZE);
+                *(list_of_connections.connections) = realloc(*(list_of_connections.connections), sizeof(tls_connection*) * SIZE);
             }
             list_of_connections.current_size++;
         }
@@ -314,33 +314,33 @@ void *process_file(char *file) {
         logger(1, err_buff);
     }
     logger(2, "Start processing packets");
-    list_of_connections.connections = (tls_connection *)malloc(sizeof(tls_connection) * SIZE);
+    *(list_of_connections.connections) = (tls_connection *)malloc(SIZE * sizeof(tls_connection *));
     list_of_connections.max_size = SIZE;
     list_of_connections.current_size = 0;
     if (pcap_loop(fp, 0, packet_handler, NULL) < 0) {
         logger(1, pcap_geterr(fp));
     }
-    tls_connection conn; 
+    tls_connection *conn; 
     char source_ip[INET_ADDRSTRLEN], dest_ip[INET_ADDRSTRLEN];
     char tmp[80];
     struct tm *info;
     printf("HERE\n");
     for (int i = 0; i < list_of_connections.current_size; i++){
         conn = list_of_connections.connections[i];
-        info = localtime(&conn.time_stamp.tv_sec);
+        info = localtime(&conn->time_stamp.tv_sec);
         strftime(tmp, 80, "%Y-%m-%d\n%X", info);
-        inet_ntop(AF_INET, &(conn.src_ip), source_ip, INET_ADDRSTRLEN);
-        inet_ntop(AF_INET, &(conn.dst_ip), dest_ip, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &(conn->src_ip), source_ip, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &(conn->dst_ip), dest_ip, INET_ADDRSTRLEN);
         fprintf(stdout, "Timestamp: %s.%ld,\nSource IP: %s,\nSource port: %d,\nDestination IP: %s,\nSNI: %s,\nbytes: %d,\npackets:%d\n", 
             tmp, 
-            conn.time_stamp.tv_usec,
+            conn->time_stamp.tv_usec,
             source_ip, 
-            conn.src_port, 
+            conn->src_port, 
             dest_ip, 
-            conn.sni, 
-            conn.bytes, 
-            conn.packet_count);
-        free(conn.sni);
+            conn->sni, 
+            conn->bytes, 
+            conn->packet_count);
+        free(conn->sni);
     }
     free(list_of_connections.connections);
     // logger(1, "Count of packets in file");
