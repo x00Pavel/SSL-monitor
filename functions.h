@@ -19,7 +19,7 @@ typedef unsigned char u_char;
 typedef unsigned int u_int; 
 
 void packet_handler(u_char *userData, const struct pcap_pkthdr* pkthdr, const u_char* packet);
-void logger(int type, char *msg);
+void logger(int , void *);
 int check_iface(char*, char *buff);
 int check_file(char*, char *buff);
 void *start_listen();
