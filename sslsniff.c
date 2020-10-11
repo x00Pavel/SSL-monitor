@@ -4,10 +4,19 @@
 
 #include "functions.h"
 
+void help(){
+    fprintf(stdout,
+    "Basic usage:\n\t./sslniff -r file_name.pcapng\n\t./sslniff -i interface\n\n"
+    "Arguments:\n"
+    "\t-r <file_name>  file in pcap/pcapng format to be aggreageted\n"
+    "\t-i <interface>  network interafce to be sniffed\n"
+    );
+}
+
 int main(int argc, char *argv[]) {
     (void)argv;
     if (argc == 1) {
-        logger(1, "Wrong number of input arguments\n");
+        help();
         return 0;
     }
     logger(2, "Program started");
