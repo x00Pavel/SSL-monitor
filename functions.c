@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+
 #define SIZE 10
 
 struct sockaddr_in server;
@@ -192,26 +193,25 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
     if (ntohs(ethernet_header->ether_type) == ETHERTYPE_IP) {
         tls_connection *conn;
         int index = -1;
-
         ip_header = (struct iphdr *)(packet + sizeof(struct ether_header));
 
         if (ip_header->protocol != IPPROTO_TCP) {
             logger(1, "Not TCP packet, skip");
             return;
         }
-  
+
         tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) +
                                        sizeof(struct iphdr));
 
-
         for (int i = 0; i < list_of_connections.current_size; i++) {
+
             conn = &list_of_connections.connections[i];
-            if ((conn->src_ip == ip_header->saddr &&
-                 conn->dst_ip == ip_header->daddr &&
+            if ((conn->src_ip   == ip_header->saddr &&
+                 conn->dst_ip   == ip_header->daddr &&
                  conn->src_port == tcp_header->source &&
                  conn->dst_port == tcp_header->dest) ||
-                (conn->src_ip == ip_header->daddr &&
-                 conn->dst_ip == ip_header->saddr &&
+                (conn->src_ip   == ip_header->daddr &&
+                 conn->dst_ip   == ip_header->saddr &&
                  conn->src_port == tcp_header->dest &&
                  conn->dst_port == tcp_header->source)) {
                 index = i;
@@ -264,19 +264,19 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
     }
 }
 
-void *start_listen(char *iface) {
+void *start_listen(void *p) {
+    pcap_t *handler = (pcap_t *)p;
     logger(2, "Listen interface");
-    pcap_t *handler = pcap_open_live(iface, 65536, 1, 0, err_buff);
     struct bpf_program prog;
     const uint8_t *packet;
     struct pcap_pkthdr header;
+    char err_buff[PCAP_ERRBUF_SIZE];
+
     if (handler == NULL) {
         logger(1, err_buff);
     }
 
-    if (pcap_compile(handler, &prog,
-                     "tcp port 443 and ((tcp[((tcp[12] & 0xf0) >> 2)] = 0x16)",
-                     0, PCAP_NETMASK_UNKNOWN) == 1) {
+    if (pcap_compile(handler, &prog, "tcp port 443", 0, PCAP_NETMASK_UNKNOWN) == 1) {
         logger(1, "Filter can't be created");
         logger(1, pcap_geterr(handler));
     }
@@ -286,6 +286,10 @@ void *start_listen(char *iface) {
         logger(1, err_buff);
     }
 
+    list_of_connections.connections =
+        (tls_connection *)malloc(SIZE * sizeof(tls_connection));
+    list_of_connections.max_size = SIZE;
+    list_of_connections.current_size = 0;
     for (;;) {
         packet = pcap_next(handler, &header);
         if (packet == NULL) {
@@ -293,10 +297,15 @@ void *start_listen(char *iface) {
         }
         packet_handler((unsigned char *)"", &header, packet);
     }
+    free(list_of_connections.connections);
+    pthread_exit(NULL);
 }
 
-void *process_file(char *file) {
+void *process_file(void *p) {
+    char *file = (char*)p;
     struct bpf_program prog;
+    char err_buff[PCAP_ERRBUF_SIZE];
+
     pcap_t *fp = pcap_open_offline(file, err_buff);
     if (fp == NULL) {
         logger(1, err_buff);
@@ -334,18 +343,25 @@ void *process_file(char *file) {
         }
     }
     free(list_of_connections.connections);
+    pthread_exit(NULL);
 }
 
-int check_iface(char *iface, char *buff) {
-    // TODO
-    (void)buff;
-    (void)iface;
-    return 0;
+pcap_t * check_iface(char *iface) {
+    char err_buff[PCAP_ERRBUF_SIZE];
+    pcap_t *handler = pcap_open_live(iface, 65536, 1, 0, err_buff);
+    if (handler == NULL) {
+        logger(1, "Couldn't open device");
+        logger(1, err_buff);
+        return NULL;
+    }
+    return handler;
 }
 
-int check_file(char *file, char *buff) {
-    if( access( file, F_OK ) != -1 ) {
-    // file exists
+int check_file(char *file) {
+    printf("Filename: %s\n", file);
+    if(access( file, F_OK ) == -1 ) {
+        logger(1, "Given file does not exist");
+        return 1;
     }
     return 0;
 }
