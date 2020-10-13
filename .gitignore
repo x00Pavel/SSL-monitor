@@ -14,3 +14,6 @@ docs/manual.log
 docs/manual.pdf
 docs/manual.synctex.gz
 docs/manual.toc
+result.txt
+test_long2.pcapng
+docs/manual.out
