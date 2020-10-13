@@ -3,3 +3,21 @@
 sslniff \- simple applitcion for monitoriing SSL connections
 .SH SYNOPSIS
 .B sslniff
+[\fB\-r\fR \fIFILENAME\fR]
+[\fB\-i\fR \fIINTERFACE\fR]
+.SH DESCRIPTION
+1. can read and aggrigate data from file.
+Result of processing will be  wreating to STDOUT after aggregation of the whole file.
+.PP
+2. can aggregate live network connections on given interface
+.PP
+Witout any parameters will write help message
+.SH OPTIONS
+.TP
+.BR \-r
+Set file to aggregate.
+Optional
+.TP
+.BR \-i
+Set interface to aggregate.
+Optional
