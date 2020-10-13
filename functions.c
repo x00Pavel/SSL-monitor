@@ -42,6 +42,7 @@ typedef struct {
     char *sni;
     u_int packet_count;
     u_int bytes;
+    u_int addr_size;
     bool server_fin;
     bool server_ack;
     bool client_ack;
@@ -78,7 +79,8 @@ void logger(int type, void *msg) {
         case 3:
             pp = (tls_connection*)msg;
             struct tm *info = localtime(&pp->time_stamp.tv_sec);
-            char source_ip[INET_ADDRSTRLEN], dest_ip[INET_ADDRSTRLEN];
+            char *source_ip = (char*)malloc(pp->addr_size);
+            char *dest_ip = (char*)malloc(pp->addr_size);
             char tmp[80];
 
             strftime(tmp, 80, "%Y-%m-%d %X", info);
@@ -99,6 +101,8 @@ void logger(int type, void *msg) {
                 i++, tmp, pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port),
                 dest_ip, pp->sni, pp->bytes, pp->packet_count,
                 pp->duration);
+            free(source_ip);
+            free(dest_ip);
         default:
             break;
     }
@@ -246,6 +250,7 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
             new_conn->duration = 0;
             new_conn->server_ack = 0;
             new_conn->server_fin = 0;
+            new_conn->addr_size = ip_header->version == 4 ? INET_ADDRSTRLEN : INET6_ADDRSTRLEN;
             list_of_connections.connections[list_of_connections.current_size] =
                 *new_conn;
             if (list_of_connections.current_size + 1 ==
