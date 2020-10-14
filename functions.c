@@ -46,6 +46,8 @@ typedef struct {
     bool server_fin;
     bool server_ack;
     bool client_ack;
+    bool client_fin;
+    bool last_ack;
 } tls_connection;
 
 
@@ -67,6 +69,9 @@ void logger(int type, void *msg) {
     int seconds = local->tm_sec;
     static int i = 1;
     tls_connection *pp;
+    char *source_ip;
+    char *dest_ip;
+
     switch (type) {
         case 1:
             printf("\033[0;31m%d - %02d:%02d:%02d - ERROR\033[0m: %s\n",
@@ -79,8 +84,8 @@ void logger(int type, void *msg) {
         case 3:
             pp = (tls_connection*)msg;
             struct tm *info = localtime(&pp->time_stamp.tv_sec);
-            char *source_ip = (char*)malloc(pp->addr_size);
-            char *dest_ip = (char*)malloc(pp->addr_size);
+            source_ip = (char*)malloc(pp->addr_size);
+            dest_ip = (char*)malloc(pp->addr_size);
             char tmp[80];
 
             strftime(tmp, 80, "%Y-%m-%d %X", info);
@@ -103,6 +108,7 @@ void logger(int type, void *msg) {
                 pp->duration);
             free(source_ip);
             free(dest_ip);
+            break;
         default:
             break;
     }
@@ -210,14 +216,33 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
         for (int i = 0; i < list_of_connections.current_size; i++) {
 
             conn = &list_of_connections.connections[i];
-            if ((conn->src_ip   == ip_header->saddr &&
+            if (conn->src_ip   == ip_header->saddr &&
                  conn->dst_ip   == ip_header->daddr &&
                  conn->src_port == tcp_header->source &&
-                 conn->dst_port == tcp_header->dest) ||
-                (conn->src_ip   == ip_header->daddr &&
+                 conn->dst_port == tcp_header->dest){
+                if (tcp_header->th_flags == 0x011){
+                    conn->client_fin = true;
+                    conn->client_ack = true;
+                }
+                // If it is really the last packet in TCP connection
+                else if (conn->client_fin && conn->client_ack && conn->server_ack && conn->server_fin && (tcp_header->th_flags == 0x010)){ 
+                    conn->last_ack = true;
+                }
+                index = i;
+                break;
+                }
+            else if (conn->src_ip   == ip_header->daddr &&
                  conn->dst_ip   == ip_header->saddr &&
                  conn->src_port == tcp_header->dest &&
-                 conn->dst_port == tcp_header->source)) {
+                 conn->dst_port == tcp_header->source) {
+                if (tcp_header->th_flags == 0x011){
+                    conn->server_fin = true;
+                    conn->server_ack = true;
+                }
+                // If it is really the last packet in TCP connection
+                else if (conn->client_fin && conn->client_ack && conn->server_ack && conn->server_fin && (tcp_header->th_flags == 0x010)){
+                    conn->last_ack = true;
+                }
                 index = i;
                 break;
             }
@@ -227,15 +252,16 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
             tls_connection *pp = &list_of_connections.connections[index];
             pp->packet_count++;
             pp->duration = time_diff(pkt_hdr->ts, pp->time_stamp);
-            if (userData != NULL){
-                if (pp->server_fin && pp->server_ack && (tcp_header->ack == 1)){
+            if (userData != NULL){ // It is live stream
+                if (pp->last_ack){
                     free_index = index;
                 }
                 logger(3, pp);
-            // check if this packet have FIN + ACK od servera
-            // whete for last ACK from client
-            // free SNI, can be overwriten flag
-
+                // If free_index is not -1, then there is finished connection -> free memory for it
+                if (free_index != -1){
+                    free(pp->sni);
+                    free(pp);
+                }
             }
         } else {
             tls_connection *new_conn = malloc(sizeof(tls_connection));
@@ -251,8 +277,14 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
             new_conn->server_ack = 0;
             new_conn->server_fin = 0;
             new_conn->addr_size = ip_header->version == 4 ? INET_ADDRSTRLEN : INET6_ADDRSTRLEN;
+            if (free_index != -1){
+                list_of_connections.connections[free_index] = *new_conn;
+                free_index = -1;    
+            }
+            else{
             list_of_connections.connections[list_of_connections.current_size] =
                 *new_conn;
+            }
             if (list_of_connections.current_size + 1 ==
                 list_of_connections.current_size) {
                 list_of_connections.connections =
