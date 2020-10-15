@@ -22,3 +22,4 @@ pcap_t * check_iface(char*);
 int check_file(char*);
 void *start_listen(void *);
 void *process_file(void *);
+void clean_up(int dummy);

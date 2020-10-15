@@ -33,8 +33,7 @@ typedef struct {
     char *data;
 } extention;
 
-
-typedef struct {
+typedef struct tls_conn{
     u_int src_ip, dst_ip;
     u_int16_t src_port, dst_port;
     struct timeval time_stamp;
@@ -48,17 +47,92 @@ typedef struct {
     bool client_ack;
     bool client_fin;
     bool last_ack;
+    struct tls_conn *prev;
+    struct tls_conn *next;
 } tls_connection;
 
-
-struct {
-    int max_size;
-    int current_size;
-    tls_connection *connections;
-} list_of_connections;
+tls_connection *connections = NULL;
 
 
-// tls_connection connections[SIZE];
+tls_connection *get_conn(const struct iphdr *ip_header, const struct tcphdr *tcp_header){
+    tls_connection *pp = connections;
+    while (pp != NULL){
+        if (pp->src_ip   == ip_header->saddr &&
+            pp->dst_ip   == ip_header->daddr &&
+            pp->src_port == tcp_header->source &&
+            pp->dst_port == tcp_header->dest){
+            if (tcp_header->th_flags == 0x011){
+                pp->client_fin = true;
+                pp->client_ack = true;
+            }
+            // If it is really the last packet in TCP connection
+            else if (pp->client_fin && pp->client_ack && pp->server_ack && pp->server_fin && (tcp_header->th_flags == 0x010)){ 
+                pp->last_ack = true;
+            }
+            return pp;
+        }
+        else if (pp->src_ip   == ip_header->daddr &&
+                pp->dst_ip   == ip_header->saddr &&
+                pp->src_port == tcp_header->dest &&
+                pp->dst_port == tcp_header->source) {
+            if (tcp_header->th_flags == 0x011){
+                pp->server_fin = true;
+                pp->server_ack = true;
+            }
+            // If it is really the last packet in TCP connection
+            else if (pp->client_fin && pp->client_ack && pp->server_ack && pp->server_fin && (tcp_header->th_flags == 0x010)){
+                pp->last_ack = true;
+            }
+            return pp;
+        } 
+        pp = pp->next;
+    }
+    return NULL;
+}
+
+
+void insert_conn(tls_connection *conn){
+    if (connections == NULL){
+        conn->next = NULL;
+        conn->prev = NULL;
+        connections = conn;
+    }
+    else{        
+        conn->prev = NULL;
+        conn->next = connections;
+        connections->prev = conn;
+        connections = conn;        
+    }
+}
+
+tls_connection *delete_conn(tls_connection *conn){
+    tls_connection *prev = conn->prev;
+    tls_connection *next = conn->next;
+    if (prev != NULL){
+        prev->next = next;
+    }
+    if (next != NULL){
+        next->prev = prev;
+    }
+    if (strcmp("No SNI", conn->sni) != 0) {
+        free(conn->sni);
+    }
+    free(conn);
+    return next;
+}
+
+
+void clean_up(int dummy){
+    (void)dummy;
+    tls_connection *conn = connections;
+    while (conn != NULL){
+        conn = delete_conn(conn);
+    }
+    logger(2, "Cleaning up is done");
+    logger(2, "Exit");
+    exit(0);
+}
+
 void logger(int type, void *msg) {
     static int log_count = 0;
     time_t now;
@@ -68,9 +142,12 @@ void logger(int type, void *msg) {
     int minutes = local->tm_min;  // get minutes passed after the hour (0-59)
     int seconds = local->tm_sec;
     static int i = 1;
+    (void)i;
     tls_connection *pp;
     char *source_ip;
     char *dest_ip;
+    struct tm *info;
+    char tmp[80];
 
     switch (type) {
         case 1:
@@ -83,15 +160,15 @@ void logger(int type, void *msg) {
             break;
         case 3:
             pp = (tls_connection*)msg;
-            struct tm *info = localtime(&pp->time_stamp.tv_sec);
+            info = localtime(&pp->time_stamp.tv_sec);
             source_ip = (char*)malloc(pp->addr_size);
             dest_ip = (char*)malloc(pp->addr_size);
-            char tmp[80];
 
             strftime(tmp, 80, "%Y-%m-%d %X", info);
-            inet_ntop(AF_INET, &(pp->src_ip), source_ip, INET_ADDRSTRLEN);
-            inet_ntop(AF_INET, &(pp->dst_ip), dest_ip, INET_ADDRSTRLEN);
+            inet_ntop(AF_INET, &(pp->src_ip), source_ip, pp->addr_size);
+            inet_ntop(AF_INET, &(pp->dst_ip), dest_ip, pp->addr_size);
             
+            #ifdef DEBUG
             fprintf(stdout,
                 "------------------------------------\n"
                 "               %d                   \n"
@@ -106,6 +183,13 @@ void logger(int type, void *msg) {
                 i++, tmp, pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port),
                 dest_ip, pp->sni, pp->bytes, pp->packet_count,
                 pp->duration);
+            #else
+            fprintf(stdout, "%s.%ld, %s, %d, %s, %s, %d, %d, %.3f\n",
+                tmp, pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port),
+                dest_ip, pp->sni, pp->bytes, pp->packet_count,
+                pp->duration);
+            #endif
+
             free(source_ip);
             free(dest_ip);
             break;
@@ -123,12 +207,12 @@ void logger(int type, void *msg) {
  *
  * @return pointer to the string with SNI
  */
-void process_tls(u_char *payload) {
+void process_tls(tls_connection *pp, u_char *payload) {
     uint8_t *content_type = payload;
     char len_hex[5];
     u_int data_size;
-    tls_connection *pp =
-        &list_of_connections.connections[list_of_connections.current_size - 1];
+    // tls_connection *pp =
+    //     &list_of_connections.connections[list_of_connections.current_size - 1];
 
     sprintf(len_hex, "%02x%02x", *(content_type + 3), *(content_type + 4));
     sscanf(len_hex, "%04x", &data_size);
@@ -167,9 +251,6 @@ void process_tls(u_char *payload) {
                 if (ext.ext_type == 0) {  // 0 - Client hello
                     sprintf(len_hex, "%02x%02x", *(i + 7), *(i + 8));
                     sscanf(len_hex, "%04x", &sni_length);
-                    tls_connection *pp =
-                        &list_of_connections
-                             .connections[list_of_connections.current_size - 1];
                     pp->sni = (char *)malloc(sni_length + 1);
                     snprintf(pp->sni, sni_length, "%s\n", (char *)i + 9);
                 }
@@ -189,8 +270,7 @@ double time_diff(struct timeval x, struct timeval y) {
     return diff / 100000;
 }
 
-void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
-                    const u_char *packet) {
+void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr, const u_char *packet) {
     const struct ether_header *ethernet_header;
     const struct iphdr *ip_header;
     const struct tcphdr *tcp_header;
@@ -202,7 +282,6 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
     ethernet_header = (struct ether_header *)packet;
     if (ntohs(ethernet_header->ether_type) == ETHERTYPE_IP) {
         tls_connection *conn;
-        int index = -1;
         ip_header = (struct iphdr *)(packet + sizeof(struct ether_header));
 
         if (ip_header->protocol != IPPROTO_TCP) {
@@ -213,93 +292,40 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr,
         tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) +
                                        sizeof(struct iphdr));
 
-        for (int i = 0; i < list_of_connections.current_size; i++) {
-
-            conn = &list_of_connections.connections[i];
-            if (conn->src_ip   == ip_header->saddr &&
-                 conn->dst_ip   == ip_header->daddr &&
-                 conn->src_port == tcp_header->source &&
-                 conn->dst_port == tcp_header->dest){
-                if (tcp_header->th_flags == 0x011){
-                    conn->client_fin = true;
-                    conn->client_ack = true;
-                }
-                // If it is really the last packet in TCP connection
-                else if (conn->client_fin && conn->client_ack && conn->server_ack && conn->server_fin && (tcp_header->th_flags == 0x010)){ 
-                    conn->last_ack = true;
-                }
-                index = i;
-                break;
-                }
-            else if (conn->src_ip   == ip_header->daddr &&
-                 conn->dst_ip   == ip_header->saddr &&
-                 conn->src_port == tcp_header->dest &&
-                 conn->dst_port == tcp_header->source) {
-                if (tcp_header->th_flags == 0x011){
-                    conn->server_fin = true;
-                    conn->server_ack = true;
-                }
-                // If it is really the last packet in TCP connection
-                else if (conn->client_fin && conn->client_ack && conn->server_ack && conn->server_fin && (tcp_header->th_flags == 0x010)){
-                    conn->last_ack = true;
-                }
-                index = i;
-                break;
-            }
+        conn = get_conn(ip_header, tcp_header);
+        if (conn == NULL){
+            conn = malloc(sizeof(tls_connection));
+            conn->dst_ip = ip_header->daddr;
+            conn->src_ip = ip_header->saddr;
+            conn->src_port = tcp_header->source;
+            conn->dst_port = tcp_header->dest;
+            conn->sni = "No SNI";
+            conn->time_stamp = pkt_hdr->ts;
+            conn->packet_count = 1;
+            conn->bytes = 0;
+            conn->duration = 0;
+            conn->server_ack = 0;
+            conn->server_fin = 0;
+            conn->addr_size = ip_header->version == 4 ? INET_ADDRSTRLEN : INET6_ADDRSTRLEN;
+            insert_conn(conn);
         }
-
-        if (index != -1) {
-            tls_connection *pp = &list_of_connections.connections[index];
-            pp->packet_count++;
-            pp->duration = time_diff(pkt_hdr->ts, pp->time_stamp);
+        else{
+            conn->packet_count++;
+            conn->duration = time_diff(pkt_hdr->ts, conn->time_stamp);
             if (userData != NULL){ // It is live stream
-                if (pp->last_ack){
-                    free_index = index;
-                }
-                logger(3, pp);
-                // If free_index is not -1, then there is finished connection -> free memory for it
-                if (free_index != -1){
-                    free(pp->sni);
-                    free(pp);
+                logger(3, conn);
+                if (conn->last_ack){
+                    delete_conn(conn);
                 }
             }
-        } else {
-            tls_connection *new_conn = malloc(sizeof(tls_connection));
-            new_conn->dst_ip = ip_header->daddr;
-            new_conn->src_ip = ip_header->saddr;
-            new_conn->src_port = tcp_header->source;
-            new_conn->dst_port = tcp_header->dest;
-            new_conn->sni = "No SNI";
-            new_conn->time_stamp = pkt_hdr->ts;
-            new_conn->packet_count = 1;
-            new_conn->bytes = 0;
-            new_conn->duration = 0;
-            new_conn->server_ack = 0;
-            new_conn->server_fin = 0;
-            new_conn->addr_size = ip_header->version == 4 ? INET_ADDRSTRLEN : INET6_ADDRSTRLEN;
-            if (free_index != -1){
-                list_of_connections.connections[free_index] = *new_conn;
-                free_index = -1;    
-            }
-            else{
-            list_of_connections.connections[list_of_connections.current_size] =
-                *new_conn;
-            }
-            if (list_of_connections.current_size + 1 ==
-                list_of_connections.current_size) {
-                list_of_connections.connections =
-                    realloc(list_of_connections.connections,
-                            sizeof(tls_connection) * SIZE);
-            }
-            list_of_connections.current_size++;
         }
-
-        data = (u_char *)(packet + sizeof(struct ethhdr) + ip_header->ihl * 4 +
-                          tcp_header->th_off * 4);
-        process_tls(data);
+        data = (u_char *)(packet + sizeof(struct ethhdr) + ip_header->ihl * 4 + tcp_header->th_off * 4);
+        process_tls(conn, data);
         count++;
     }
 }
+
+
 
 void *start_listen(void *p) {
     pcap_t *handler = (pcap_t *)p;
@@ -323,10 +349,6 @@ void *start_listen(void *p) {
         logger(1, err_buff);
     }
 
-    list_of_connections.connections =
-        (tls_connection *)malloc(SIZE * sizeof(tls_connection));
-    list_of_connections.max_size = SIZE;
-    list_of_connections.current_size = 0;
     for (;;) {
         packet = pcap_next(handler, &header);
         if (packet == NULL) {
@@ -334,7 +356,6 @@ void *start_listen(void *p) {
         }
         packet_handler((unsigned char *)"", &header, packet);
     }
-    free(list_of_connections.connections);
     pthread_exit(NULL);
 }
 
@@ -361,25 +382,17 @@ void *process_file(void *p) {
 
     logger(2, "Start processing packets");
 
-    list_of_connections.connections =
-        (tls_connection *)malloc(SIZE * sizeof(tls_connection));
-    list_of_connections.max_size = SIZE;
-    list_of_connections.current_size = 0;
-
     if (pcap_loop(fp, 0, packet_handler, NULL) < 0) {
         logger(1, pcap_geterr(fp));
     }
 
     // Print all aggregated packages
-    tls_connection *conn;
-    for (int i = 0; i < list_of_connections.current_size; i++) {
-        conn = &list_of_connections.connections[i];
+    tls_connection *conn = connections;
+    while (conn != NULL){
         logger(3, conn);
-        if (strcmp("No SNI", conn->sni) != 0) {
-            free(conn->sni);
-        }
+        conn = delete_conn(conn);
     }
-    free(list_of_connections.connections);
+
     pthread_exit(NULL);
 }
 

@@ -12,3 +12,6 @@ run:
 
 run_s:
 	./sslsniff -r test_short.pcapng
+
+dev:
+	gcc $(CFLAGS) $(MODULES) -o sslsniff -lpcap -lpthread -D DEBUG

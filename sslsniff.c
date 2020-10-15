@@ -1,5 +1,6 @@
 #include <getopt.h>
 #include <stdlib.h>
+#include <signal.h>
 
 #include "functions.h"
 
@@ -19,7 +20,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     logger(2, "Program started");
-
+    signal(SIGINT, clean_up);
     int c, rc = 0;
     pthread_t tid_file = 0; 
     pthread_t tid_iface = 0; 
@@ -61,7 +62,6 @@ int main(int argc, char *argv[]) {
         }
     }
     if (tid_file != (long unsigned int)0){
-        printf("Start her\n");
         pthread_join(tid_file, NULL);
         
     }
