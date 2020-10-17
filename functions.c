@@ -51,16 +51,16 @@ typedef struct tls_conn{
     struct tls_conn *next;
 } tls_connection;
 
-tls_connection *connections = NULL;
+tls_connection *connections;
 
 
 tls_connection *get_conn(const struct iphdr *ip_header, const struct tcphdr *tcp_header){
     tls_connection *pp = connections;
     while (pp != NULL){
-        if (pp->src_ip   == ip_header->saddr &&
-            pp->dst_ip   == ip_header->daddr &&
-            pp->src_port == tcp_header->source &&
-            pp->dst_port == tcp_header->dest){
+        if ((pp->src_ip   == ip_header->saddr) &&
+            (pp->dst_ip   == ip_header->daddr) &&
+            (pp->src_port == tcp_header->source) &&
+            (pp->dst_port == tcp_header->dest)){
             if (tcp_header->th_flags == 0x011){
                 pp->client_fin = true;
                 pp->client_ack = true;
@@ -71,10 +71,10 @@ tls_connection *get_conn(const struct iphdr *ip_header, const struct tcphdr *tcp
             }
             return pp;
         }
-        else if (pp->src_ip   == ip_header->daddr &&
-                pp->dst_ip   == ip_header->saddr &&
-                pp->src_port == tcp_header->dest &&
-                pp->dst_port == tcp_header->source) {
+        else if ((pp->src_ip   == ip_header->daddr) &&
+                (pp->dst_ip   == ip_header->saddr) &&
+                (pp->src_port == tcp_header->dest) &&
+                (pp->dst_port == tcp_header->source)) {
             if (tcp_header->th_flags == 0x011){
                 pp->server_fin = true;
                 pp->server_ack = true;
@@ -105,6 +105,7 @@ void insert_conn(tls_connection *conn){
     }
 }
 
+
 tls_connection *delete_conn(tls_connection *conn){
     tls_connection *prev = conn->prev;
     tls_connection *next = conn->next;
@@ -132,6 +133,7 @@ void clean_up(int dummy){
     logger(2, "Exit");
     exit(0);
 }
+
 
 void logger(int type, void *msg) {
     static int log_count = 0;
@@ -167,7 +169,6 @@ void logger(int type, void *msg) {
             strftime(tmp, 80, "%Y-%m-%d %X", info);
             inet_ntop(AF_INET, &(pp->src_ip), source_ip, pp->addr_size);
             inet_ntop(AF_INET, &(pp->dst_ip), dest_ip, pp->addr_size);
-            
             #ifdef DEBUG
             fprintf(stdout,
                 "------------------------------------\n"
@@ -175,12 +176,13 @@ void logger(int type, void *msg) {
                 "Timestamp: %s.%ld\n"
                 "Source IP: %s,\n"
                 "Source port: %d,\n"
+                "Destination port: %d,\n"
                 "Destination IP: %s,\n"
                 "SNI: %s\n"
                 "Bytes: %d,\n"
                 "Packets:%d\n"
                 "Duration: %.3f\n",
-                i++, tmp, pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port),
+                i++, tmp, pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port),ntohs(pp->dst_port),
                 dest_ip, pp->sni, pp->bytes, pp->packet_count,
                 pp->duration);
             #else
@@ -210,14 +212,13 @@ void logger(int type, void *msg) {
 void process_tls(tls_connection *pp, u_char *payload) {
     uint8_t *content_type = payload;
     char len_hex[5];
-    u_int data_size;
-    // tls_connection *pp =
-    //     &list_of_connections.connections[list_of_connections.current_size - 1];
 
-    sprintf(len_hex, "%02x%02x", *(content_type + 3), *(content_type + 4));
-    sscanf(len_hex, "%04x", &data_size);
-
-    pp->bytes += data_size;
+    if (*content_type >=20 && *content_type <= 23){
+        u_int data_size;
+        sprintf(len_hex, "%02x%02x", *(content_type + 3), *(content_type + 4));
+        sscanf(len_hex, "%04x", &data_size);
+        pp->bytes += data_size;
+    }
 
     if (*content_type == 22) {
         uint8_t *handshake_type = content_type + 5;
@@ -259,6 +260,7 @@ void process_tls(tls_connection *pp, u_char *payload) {
     }
 }
 
+
 double time_diff(struct timeval x, struct timeval y) {
     double x_ms, y_ms, diff;
 
@@ -270,6 +272,7 @@ double time_diff(struct timeval x, struct timeval y) {
     return diff / 100000;
 }
 
+
 void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr, const u_char *packet) {
     const struct ether_header *ethernet_header;
     const struct iphdr *ip_header;
@@ -278,7 +281,6 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr, const u
 
     (void)userData;
 
-    logger(2, "Processing next packet");
     ethernet_header = (struct ether_header *)packet;
     if (ntohs(ethernet_header->ether_type) == ETHERTYPE_IP) {
         tls_connection *conn;
@@ -288,13 +290,15 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr, const u
             logger(1, "Not TCP packet, skip");
             return;
         }
+        logger(2, "Processing next packet");
 
         tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) +
                                        sizeof(struct iphdr));
 
         conn = get_conn(ip_header, tcp_header);
+        
         if (conn == NULL){
-            conn = malloc(sizeof(tls_connection));
+            conn = (tls_connection*)malloc(sizeof(tls_connection));
             conn->dst_ip = ip_header->daddr;
             conn->src_ip = ip_header->saddr;
             conn->src_port = tcp_header->source;
@@ -304,23 +308,31 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr, const u
             conn->packet_count = 1;
             conn->bytes = 0;
             conn->duration = 0;
-            conn->server_ack = 0;
-            conn->server_fin = 0;
+            conn->server_ack = false;
+            conn->server_fin = false;
+            conn->client_ack = false;
+            conn->client_fin = false;
+            conn->last_ack = false;
             conn->addr_size = ip_header->version == 4 ? INET_ADDRSTRLEN : INET6_ADDRSTRLEN;
+                
             insert_conn(conn);
         }
         else{
             conn->packet_count++;
             conn->duration = time_diff(pkt_hdr->ts, conn->time_stamp);
             if (userData != NULL){ // It is live stream
-                logger(3, conn);
                 if (conn->last_ack){
+                    logger(2, "Last packet");
+                    logger(3, conn);
                     delete_conn(conn);
                 }
             }
         }
-        data = (u_char *)(packet + sizeof(struct ethhdr) + ip_header->ihl * 4 + tcp_header->th_off * 4);
-        process_tls(conn, data);
+        int size = sizeof(struct ethhdr) + ip_header->ihl * 4 + tcp_header->th_off * 4;
+        if ((pkt_hdr->len - size) > 0){
+            data = (u_char *)(packet + size);
+            process_tls(conn, data);
+        }
         count++;
     }
 }
@@ -334,7 +346,7 @@ void *start_listen(void *p) {
     const uint8_t *packet;
     struct pcap_pkthdr header;
     char err_buff[PCAP_ERRBUF_SIZE];
-
+    connections = NULL;
     if (handler == NULL) {
         logger(1, err_buff);
     }
@@ -349,13 +361,8 @@ void *start_listen(void *p) {
         logger(1, err_buff);
     }
 
-    for (;;) {
-        packet = pcap_next(handler, &header);
-        if (packet == NULL) {
-            logger(1, "Didn't grab packet");
-        }
-        packet_handler((unsigned char *)"", &header, packet);
-    }
+    int rc = pcap_loop(handler, -1, packet_handler, (unsigned char *)"");
+
     pthread_exit(NULL);
 }
 
@@ -385,7 +392,7 @@ void *process_file(void *p) {
     if (pcap_loop(fp, 0, packet_handler, NULL) < 0) {
         logger(1, pcap_geterr(fp));
     }
-
+    
     // Print all aggregated packages
     tls_connection *conn = connections;
     while (conn != NULL){

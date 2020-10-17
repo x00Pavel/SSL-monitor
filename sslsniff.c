@@ -20,7 +20,9 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     logger(2, "Program started");
+
     signal(SIGINT, clean_up);
+
     int c, rc = 0;
     pthread_t tid_file = 0; 
     pthread_t tid_iface = 0; 
