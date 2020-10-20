@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
     }
     logger(2, "Program started");
 
-    signal(SIGINT, clean_up);
+    signal(SIGINT, cleanup);
 
     int c, rc = 0;
     pthread_t tid_file = 0; 

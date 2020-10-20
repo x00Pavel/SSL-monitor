@@ -34,6 +34,7 @@ typedef struct {
 } extention;
 
 typedef struct tls_conn{
+    int index;
     u_int src_ip, dst_ip;
     u_int16_t src_port, dst_port;
     struct timeval time_stamp;
@@ -52,88 +53,6 @@ typedef struct tls_conn{
 } tls_connection;
 
 tls_connection *connections;
-
-
-tls_connection *get_conn(const struct iphdr *ip_header, const struct tcphdr *tcp_header){
-    tls_connection *pp = connections;
-    while (pp != NULL){
-        if ((pp->src_ip   == ip_header->saddr) &&
-            (pp->dst_ip   == ip_header->daddr) &&
-            (pp->src_port == tcp_header->source) &&
-            (pp->dst_port == tcp_header->dest)){
-            if (tcp_header->th_flags == 0x011){
-                pp->client_fin = true;
-                pp->client_ack = true;
-            }
-            // If it is really the last packet in TCP connection
-            else if (pp->client_fin && pp->client_ack && pp->server_ack && pp->server_fin && (tcp_header->th_flags == 0x010)){ 
-                pp->last_ack = true;
-            }
-            return pp;
-        }
-        else if ((pp->src_ip   == ip_header->daddr) &&
-                (pp->dst_ip   == ip_header->saddr) &&
-                (pp->src_port == tcp_header->dest) &&
-                (pp->dst_port == tcp_header->source)) {
-            if (tcp_header->th_flags == 0x011){
-                pp->server_fin = true;
-                pp->server_ack = true;
-            }
-            // If it is really the last packet in TCP connection
-            else if (pp->client_fin && pp->client_ack && pp->server_ack && pp->server_fin && (tcp_header->th_flags == 0x010)){
-                pp->last_ack = true;
-            }
-            return pp;
-        } 
-        pp = pp->next;
-    }
-    return NULL;
-}
-
-
-void insert_conn(tls_connection *conn){
-    if (connections == NULL){
-        conn->next = NULL;
-        conn->prev = NULL;
-        connections = conn;
-    }
-    else{        
-        conn->prev = NULL;
-        conn->next = connections;
-        connections->prev = conn;
-        connections = conn;        
-    }
-}
-
-
-tls_connection *delete_conn(tls_connection *conn){
-    tls_connection *prev = conn->prev;
-    tls_connection *next = conn->next;
-    if (prev != NULL){
-        prev->next = next;
-    }
-    if (next != NULL){
-        next->prev = prev;
-    }
-    if (strcmp("No SNI", conn->sni) != 0) {
-        free(conn->sni);
-    }
-    free(conn);
-    return next;
-}
-
-
-void clean_up(int dummy){
-    (void)dummy;
-    tls_connection *conn = connections;
-    while (conn != NULL){
-        conn = delete_conn(conn);
-    }
-    logger(2, "Cleaning up is done");
-    logger(2, "Exit");
-    exit(0);
-}
-
 
 void logger(int type, void *msg) {
     static int log_count = 0;
@@ -186,10 +105,12 @@ void logger(int type, void *msg) {
                 dest_ip, pp->sni, pp->bytes, pp->packet_count,
                 pp->duration);
             #else
-            fprintf(stdout, "%s.%ld, %s, %d, %s, %s, %d, %d, %.3f\n",
-                tmp, pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port),
-                dest_ip, pp->sni, pp->bytes, pp->packet_count,
-                pp->duration);
+            if (strcmp(pp->sni, "No SNI") != 0){
+                fprintf(stdout, "%s.%06ld, %s, %d, %s, %s, %d, %d, %.3f\n",
+                    tmp, pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port),
+                    dest_ip, pp->sni, pp->bytes, pp->packet_count,
+                    pp->duration);
+            }
             #endif
 
             free(source_ip);
@@ -200,6 +121,105 @@ void logger(int type, void *msg) {
     }
     log_count++;
 }
+
+
+tls_connection *get_conn(const struct iphdr *ip_header, const struct tcphdr *tcp_header){
+    tls_connection *pp = connections;
+    while (pp != NULL){
+        // printf("----------------->>>  %d\n", pp->src_ip);
+        if ((pp->src_ip   == ip_header->saddr) &&
+            (pp->dst_ip   == ip_header->daddr) &&
+            (pp->src_port == tcp_header->source) &&
+            (pp->dst_port == tcp_header->dest)){
+            if (tcp_header->th_flags == 0x011){
+                pp->client_fin = true;
+            }
+            // If it is really the last packet in TCP connection
+            else if (pp->client_fin && pp->server_fin && (tcp_header->th_flags == 0x010)){ 
+                pp->last_ack = true;
+            }
+            if (!pp->last_ack){
+                pp->packet_count++;
+            }
+            return pp;
+        }
+        if ((pp->src_ip   == ip_header->daddr) &&
+                (pp->dst_ip   == ip_header->saddr) &&
+                (pp->src_port == tcp_header->dest) &&
+                (pp->dst_port == tcp_header->source)) {
+            if (tcp_header->th_flags == 0x011){
+                pp->server_fin = true;
+                // pp->server_ack = true;
+            }
+            // If it is really the last packet in TCP connection
+            else if (pp->client_fin &&  pp->server_fin && (tcp_header->th_flags == 0x010)){
+                pp->last_ack = true;
+            }
+            if (!pp->last_ack){
+                pp->packet_count++;
+            }
+            return pp;
+        } 
+        pp = pp->next;
+    }
+    return NULL;
+}
+
+
+void insert_conn(tls_connection *conn){
+    static int index = 0;
+    if (connections == NULL){
+        conn->next = NULL;
+        conn->prev = NULL;
+        conn->index = index;
+        connections = conn;
+    }
+    else{        
+        conn->prev = NULL;
+        conn->next = connections;
+        conn->index = index;
+        connections->prev = conn;
+        connections = conn;        
+    }
+    index++;
+}
+
+
+tls_connection *delete_conn(tls_connection *conn){
+    tls_connection *prev = conn->prev;
+    tls_connection *next = conn->next;
+    if (prev != NULL){
+        prev->next = next;
+    }
+    else{
+        // It is the first element in the list -> need to move pointer
+        connections = next;
+    }
+    if (next != NULL){
+        next->prev = prev;
+    }
+
+    
+    if (strcmp("No SNI", conn->sni) != 0) {
+        free(conn->sni);
+    }
+    free(conn);
+    return next;
+}
+
+
+void cleanup(int dummy){
+    (void)dummy;
+    tls_connection *conn = connections;
+    while (conn != NULL){
+        conn = delete_conn(conn);
+    }
+    logger(2, "Cleaning up is done");
+    logger(2, "Exit");
+    exit(0);
+}
+
+
 
 /**
  * Parse TLS headers
@@ -218,6 +238,7 @@ void process_tls(tls_connection *pp, u_char *payload) {
         sprintf(len_hex, "%02x%02x", *(content_type + 3), *(content_type + 4));
         sscanf(len_hex, "%04x", &data_size);
         pp->bytes += data_size;
+
     }
 
     if (*content_type == 22) {
@@ -252,8 +273,8 @@ void process_tls(tls_connection *pp, u_char *payload) {
                 if (ext.ext_type == 0) {  // 0 - Client hello
                     sprintf(len_hex, "%02x%02x", *(i + 7), *(i + 8));
                     sscanf(len_hex, "%04x", &sni_length);
-                    pp->sni = (char *)malloc(sni_length + 1);
-                    snprintf(pp->sni, sni_length, "%s\n", (char *)i + 9);
+                    pp->sni = (char *)malloc(sni_length + 2);
+                    snprintf(pp->sni, sni_length + 1, "%s\n", (char *)i + 9);
                 }
             }
         }
@@ -269,7 +290,7 @@ double time_diff(struct timeval x, struct timeval y) {
 
     diff = (double)x_ms - (double)y_ms;
 
-    return diff / 100000;
+    return diff / 1000000;
 }
 
 
@@ -290,7 +311,7 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr, const u
             logger(1, "Not TCP packet, skip");
             return;
         }
-        logger(2, "Processing next packet");
+        // logger(2, "Processing next packet");
 
         tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) +
                                        sizeof(struct iphdr));
@@ -299,6 +320,7 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr, const u
         
         if (conn == NULL){
             conn = (tls_connection*)malloc(sizeof(tls_connection));
+            // printf("-------> DST: %u   SRC: %u\n", ip_header->daddr, ip_header->saddr);
             conn->dst_ip = ip_header->daddr;
             conn->src_ip = ip_header->saddr;
             conn->src_port = tcp_header->source;
@@ -318,14 +340,12 @@ void packet_handler(u_char *userData, const struct pcap_pkthdr *pkt_hdr, const u
             insert_conn(conn);
         }
         else{
-            conn->packet_count++;
-            conn->duration = time_diff(pkt_hdr->ts, conn->time_stamp);
-            if (userData != NULL){ // It is live stream
-                if (conn->last_ack){
-                    logger(2, "Last packet");
-                    logger(3, conn);
-                    delete_conn(conn);
-                }
+            // conn->packet_count++;
+            if (conn->server_fin && conn->client_fin){
+                conn->duration = time_diff(pkt_hdr->ts, conn->time_stamp);
+                // logger(2, "Last packet");
+                logger(3, conn);
+                delete_conn(conn);
             }
         }
         int size = sizeof(struct ethhdr) + ip_header->ihl * 4 + tcp_header->th_off * 4;
@@ -343,15 +363,13 @@ void *start_listen(void *p) {
     pcap_t *handler = (pcap_t *)p;
     logger(2, "Listen interface");
     struct bpf_program prog;
-    const uint8_t *packet;
-    struct pcap_pkthdr header;
     char err_buff[PCAP_ERRBUF_SIZE];
     connections = NULL;
     if (handler == NULL) {
         logger(1, err_buff);
     }
 
-    if (pcap_compile(handler, &prog, "tcp port 443", 0, PCAP_NETMASK_UNKNOWN) == 1) {
+    if (pcap_compile(handler, &prog, "tcp", 0, PCAP_NETMASK_UNKNOWN) == 1) {
         logger(1, "Filter can't be created");
         logger(1, pcap_geterr(handler));
     }
@@ -361,8 +379,8 @@ void *start_listen(void *p) {
         logger(1, err_buff);
     }
 
-    int rc = pcap_loop(handler, -1, packet_handler, (unsigned char *)"");
-
+    pcap_loop(handler, -1, packet_handler, (unsigned char *)"");
+    
     pthread_exit(NULL);
 }
 
@@ -376,7 +394,7 @@ void *process_file(void *p) {
         logger(1, err_buff);
     }
 
-    if (pcap_compile(fp, &prog, "tcp port 443", 0, PCAP_NETMASK_UNKNOWN) ==
+    if (pcap_compile(fp, &prog, "tcp", 0, PCAP_NETMASK_UNKNOWN) ==
         -1) {
         logger(1, "Filter can't be created");
         logger(1, pcap_geterr(fp));
@@ -396,7 +414,7 @@ void *process_file(void *p) {
     // Print all aggregated packages
     tls_connection *conn = connections;
     while (conn != NULL){
-        logger(3, conn);
+        // logger(3, conn);
         conn = delete_conn(conn);
     }
 
@@ -415,7 +433,6 @@ pcap_t * check_iface(char *iface) {
 }
 
 int check_file(char *file) {
-    printf("Filename: %s\n", file);
     if(access( file, F_OK ) == -1 ) {
         logger(1, "Given file does not exist");
         return 1;
