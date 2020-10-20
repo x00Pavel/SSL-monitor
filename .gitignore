@@ -16,4 +16,5 @@ docs/manual.synctex.gz
 docs/manual.toc
 result.txt
 test_long2.pcapng
-docs/manual.out
+docs/*
+test/*
