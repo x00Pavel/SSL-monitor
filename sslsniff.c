@@ -19,7 +19,6 @@ int main(int argc, char *argv[]) {
         help();
         return 0;
     }
-    logger(2, "Program started");
 
     signal(SIGINT, cleanup);
 
