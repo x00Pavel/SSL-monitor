@@ -1,8 +1,7 @@
 /**
- * \author Pavel Yadlouski (xyadlo00)
- * \date September, 2020
- * \brief Application for SSL monitoring 
- * \file functions.h  Header file for functions.c
+ * @short Application for SSL monitoring 
+ * @file functions.h  Header file for functions.c
+ * @author Pavel Yadlouski (xyadlo00)
  */
 
 #include <pcap.h>
