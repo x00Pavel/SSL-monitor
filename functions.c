@@ -55,7 +55,7 @@ tls_connection *connections;
 
 /**
  * Loggin messages
- * 
+ *
  * @param type type of log message. 1 - error, 2 - TLS connection
  * @param msg pointer to massage
  */
@@ -82,21 +82,21 @@ void logger(int type, void *msg) {
                 inet_ntop(AF_INET, &(pp->dst_ip), dest_ip, pp->addr_size);
             }
             fprintf(stdout, "%s.%06ld,%s,%d,%s,%s,%d,%d,%f\n", tmp,
-                    pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port), dest_ip,
-                    pp->sni, pp->bytes, pp->packet_count, pp->duration);
+                    pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port),
+                    dest_ip, pp->sni, pp->bytes, pp->packet_count,
+                    pp->duration);
             free(source_ip);
             free(dest_ip);
         }
-    }
-    else if (type == 1){
+    } else if (type == 1) {
         fprintf(stdout, "Error: ");
-        fprintf(stdout, "%s\n", (char*)msg);
+        fprintf(stdout, "%s\n", (char *)msg);
     }
 }
 
 /**
  * Insert given connection into the double liked list
- * 
+ *
  * @param conn TLS connection entry to be inserted
  */
 void insert_conn(tls_connection *conn) {
@@ -114,9 +114,9 @@ void insert_conn(tls_connection *conn) {
 
 /**
  * Delete given connection from the doubly liked list.
- * 
+ *
  * @param conn TLS connection entry to be deleted
- * 
+ *
  * @return next connection in the list
  */
 tls_connection *delete_conn(tls_connection *conn) {
@@ -141,7 +141,7 @@ tls_connection *delete_conn(tls_connection *conn) {
 
 /**
  * Clean up all resourece on program termination
- * 
+ *
  * @param dummy dummy, not used
  */
 void cleanup(int dummy) {
@@ -155,10 +155,10 @@ void cleanup(int dummy) {
 
 /**
  * Find difference between two timestamps
- * 
+ *
  * @param x first timestamp
  * @param y second timestamp
- * 
+ *
  * @return difference between x and y
  */
 double time_diff(struct timeval x, struct timeval y) {
@@ -189,7 +189,7 @@ void preprocess_packet(tls_connection *pp, bool client, uint16_t fin) {
         }
     }
     // If it is really the last packet in TCP connection
-    if (pp->client_fin && pp->server_fin) {
+    else if (pp->client_fin && pp->server_fin) {
         pp->last_ack = true;
     }
     if (!pp->last_ack) {
@@ -199,14 +199,16 @@ void preprocess_packet(tls_connection *pp, bool client, uint16_t fin) {
 
 /**
  * Comape IP addresses and TCP ports. Accept both IPv4 and IPv6 headers.
- * 
+ *
  * @param conn current TLS connection
  * @param ip_header IP header of current packet
  * @param ipv4 If type of IP header is IPv4 then true, else false
- * @param client If comapirng from the client point of view then true, else false
+ * @param client If comapirng from the client point of view then true, else
+ * false
  * @param tcp_header TCP header of current packet
  *
- * @return True if address and ports for given point of view are the same, else false
+ * @return True if address and ports for given point of view are the same, else
+ * false
  */
 bool compare_addr(tls_connection *conn, const void *ip_header, bool ipv4,
                   bool client, const struct tcphdr *tcp_header) {
@@ -227,8 +229,7 @@ bool compare_addr(tls_connection *conn, const void *ip_header, bool ipv4,
                     (conn->src_port == tcp_header->dest) &&
                     (conn->dst_port == tcp_header->source));
         }
-    } 
-    else {
+    } else {
         ip6 = (struct ip6_hdr *)ip_header;
         if (client) {
             for (int i = 0; i < 16; ++i) {
@@ -298,8 +299,7 @@ tls_connection *get_conn(const struct iphdr *ip_header,
         if (compare_addr(pp, ip_header, true, true, tcp_header)) {
             preprocess_packet(pp, true, tcp_header->fin);
             return pp;
-        }
-        else if (compare_addr(pp, ip_header, true, false, tcp_header)) {
+        } else if (compare_addr(pp, ip_header, true, false, tcp_header)) {
             preprocess_packet(pp, false, tcp_header->fin);
             return pp;
         }
@@ -321,11 +321,11 @@ tls_connection *get_conn(const struct iphdr *ip_header,
 void process_tls(tls_connection *pp, u_char *payload, size_t size_of_data) {
     tls_header tls_header;
     for (u_char *j = payload; j < (payload + size_of_data);
-         j += tls_header.len + 5) {
+         j += tls_header.len + 4) {
         tls_header.type_hex = *j;
-        sprintf(tls_header.version_hex, "%02x%02x", *(j + 1), *(j + 2));
+        snprintf(tls_header.version_hex, 5, "%02x%02x", *(j + 1), *(j + 2));
         sscanf(tls_header.version_hex, "%04x", &tls_header.version);
-        sprintf(tls_header.len_hex, "%02x%02x", *(j + 3), *(j + 4));
+        snprintf(tls_header.len_hex, 5, "%02x%02x", *(j + 3), *(j + 4));
         sscanf(tls_header.len_hex, "%04x", &tls_header.len);
 
         if (tls_header.type_hex == 22) {
@@ -349,21 +349,22 @@ void process_tls(tls_connection *pp, u_char *payload, size_t size_of_data) {
                 u_char *extenstions =
                     compress_method_len + *compress_method_len + 3;
 
-                sprintf(len_hex, "%02x%02x",
+                snprintf(len_hex, 5, "%02x%02x",
                         *(compress_method_len + *compress_method_len + 1),
                         *(compress_method_len + *compress_method_len + 2));
                 sscanf(len_hex, "%04x", &all_ext_len);
                 // Find Client Hello
                 for (u_char *i = extenstions; i < (extenstions + all_ext_len);
                      i += ext.ext_len + 4) {
-                    sprintf(ext.ext_type_hex, "%02x%02x", *(i), *(i + 1));
+                    // Convert hex values to decimal
+                    snprintf(ext.ext_type_hex, 5, "%02x%02x", *i, *(i + 1));
                     sscanf(ext.ext_type_hex, "%04x", &ext.ext_type);
-                    sprintf(ext.ext_len_hex, "%02x%02x", *(i + 2), *(i + 3));
+                    snprintf(ext.ext_len_hex, 5, "%02x%02x", *(i + 2), *(i + 3));
                     sscanf(ext.ext_len_hex, "%04x", &ext.ext_len);
                     if (ext.ext_type == 0) {  // 0 - Client hello
-                        sprintf(len_hex, "%02x%02x", *(i + 7), *(i + 8));
+                        snprintf(len_hex, 5, "%02x%02x", *(i + 7), *(i + 8));
                         sscanf(len_hex, "%04x", &sni_length);
-                        pp->sni = (char *)malloc(sni_length + 2);
+                        pp->sni = (char *)malloc(sni_length + 3);
                         snprintf(pp->sni, sni_length + 1, "%s\n",
                                  (char *)i + 9);
                         break;
@@ -377,6 +378,7 @@ void process_tls(tls_connection *pp, u_char *payload, size_t size_of_data) {
         }
     }
 }
+
 /**
  * Create connection entry
  *
@@ -482,20 +484,20 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkt_hdr,
         logger(2, conn);
         delete_conn(conn);
     }
-
-    size_t size_of_data = pkt_hdr->len - size;
-    if (size_of_data > 0) {
-        data = (u_char *)(packet + size);
-        process_tls(conn, data, size_of_data);
+    else{
+        size_t size_of_data = pkt_hdr->len - size;
+        if (size_of_data > 0) {
+            data = (u_char *)(packet + size);
+            process_tls(conn, data, size_of_data);
+        }
     }
 }
 
 /**
- * Starts listening on given interface 
+ * Starts listening on given interface
  */
 void *start_listen(void *p) {
     pcap_t *handler = (pcap_t *)p;
-    logger(2, "Listen interface");
     struct bpf_program prog;
     char err_buff[PCAP_ERRBUF_SIZE];
     connections = NULL;
@@ -541,8 +543,6 @@ void *process_file(void *p) {
         logger(1, err_buff);
     }
 
-    logger(2, "Start processing packets");
-
     if (pcap_loop(fp, 0, packet_handler, NULL) < 0) {
         logger(1, pcap_geterr(fp));
     }
@@ -557,10 +557,10 @@ void *process_file(void *p) {
 }
 
 /**
- * Check if interface is valid. It true, then open given interface. 
- * 
+ * Check if interface is valid. It true, then open given interface.
+ *
  * @param iface interface name
- * 
+ *
  * @return pointer to open interface
  */
 pcap_t *check_iface(char *iface) {
@@ -576,9 +576,9 @@ pcap_t *check_iface(char *iface) {
 
 /**
  * Check if given file is exist and accesable
- * 
+ *
  * @param file filename
- * 
+ *
  * @return 1 if file is not accesable, otherwise 0
  */
 int check_file(char *file) {

@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
                 pthread_create(&tid_file, NULL, process_file, optarg);
                 break;
             default:
-                printf("Argument for %c is ignored", c);
+                printf("Argument for %c is ignored\n", c);
                 break;
         }
     }
