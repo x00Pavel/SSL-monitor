@@ -79,8 +79,8 @@
     \newpage
 
     \section{Introduction}
-    Aim of this project is to create simple CLI application, that can monitor SSL communication.
-    Here monitoring means to aggregate input file \textbf{and / or} given network interface.  
+    This project aims is to create simple CLI application, that can monitor SSL communication.
+    Here monitoring means to aggregate input file \textbf{and/or} given network interface.  
         
 
     \section{Architecture}
@@ -89,7 +89,7 @@
             \includegraphics[scale=0.7]{sslsniff.png}
         \end{figure}
     \end{center}
-    Whole program contains two main parts:
+    The whole program contains two main parts:
     \begin{enumerate}
         \item input validation
         \begin{enumerate}
@@ -103,55 +103,54 @@
         \end{enumerate}
     \end{enumerate}
     The result of file aggregation is written to the standard output as soon as
-    aggregation is completed. 
-    If interface is set, then program start listening on given interface and aggregate 
-    incoming packets. When the last packet of any connection is aggregated, 
-    then it the result of the aggregation for this particular connection would be 
-    written to the standard output. 
+    aggregation is completed. If the interface is set, then the program starts 
+    listening on the given interface and aggregate incoming packets. When the 
+    last packet of any connection is aggregated, then the result of the 
+    aggregation for this particular connection would be written to the standard output. 
 
     \subsection{Storing connections}
     As data structure for storing connections information doubly linked list is used.
-    This data structure was chosen was chosen for its simplicity of implementation 
-    and use. Also, despite of hash table, doubly linked list very flexible from
-    the memory usage point of view: doubly linked list doesn't have fix size, so
-    can grow as much as it would be necessary. In case of resizing hash table 
-    require recalculating hashes for every item, but doubly linked list doesn't
-    have this problem. There just insert to the any side of the list. Also as 
-    each element of list has pointer to previous and next elements, then deleting
-    of element is quite trivial: reset pointers between siblings of given connection
-    and delete it.
+    This data structure was chosen for its simplicity of implementation and use. 
+    Also, despite the hash table, the doubly linked list very flexible from the 
+    memory usage point of view: the doubly linked list doesn't have a fixed size, 
+    so can grow as much as it would be necessary. The case of resizing the hash 
+    table requires recalculating hashes for every item, but the doubly linked list 
+    doesn't have this problem. There just insert to any side of the list. Also as 
+    each element of the list has a pointer to previous and next elements, then 
+    deleting of an element is quite trivial: reset pointers between siblings of 
+    given connection and delete it.
 
-    The biggest disadvantage of doubly linked list is high searching complexity.
+    The biggest disadvantage of a doubly linked list is high searching complexity.
     For every package whole list can be looked through. But in this application 
     it is not significant, because is very simple. 
 
     \subsection{Packet processing}
 
-    When program is started and first packet is came, then it would be set as 
-    the first element in the list. After that for every packet would be found 
-    corresponding entry in list (based on comparing source and destination 
-    IP addresses and ports). If entry doesn't exist, then this packet would be
-    inserted to the beginning of the list with setting up links for next 
+    When the program is started and the first packet comes, then it would be set 
+    as the first element in the list. After that for every packet would be found 
+    a corresponding entry in the list (based on comparing source and destination 
+    IP addresses and ports). If the entry doesn't exist, then this packet would 
+    be inserted at the beginning of the list by setting up links for the next 
     and previous entries.
     
-    When processing file, any packet wouldn't be deleted from list during 
-    process. Because we don't know if later in the file there is no more 
-    packets that corresponds to this particular entry. But during aggregation 
-    of interface every finished connection (based on TCP flags) is freed from 
-    the list.
+    When processing a file, any packet wouldn't be deleted from the list during 
+    the process. Because we don't know if later in the file there are no more 
+    packets that correspond to this particular entry. But during aggregation 
+    of the interface, every finished connection (based on TCP flags) is freed 
+    from the list.
 
 
     \subsection{Multithreading}
-    Program use separated threads for processing file and interface 
-    simultaneously. Main thread would wait first on file processing thread 
-    and then on the interface thread.
+    Program use separated threads for processing file and interface simultaneously. 
+    The main thread would wait first on the file processing thread and then on 
+    the interface thread.
 
     
     \section{Implementation}
-    Program contains two parts: checking of input parameters and package aggregation by itself.
-    First part presents in file \textit{sslsniff.c}. Also setup functions for aggregation are 
-    called there. Second part is represented in file \textit{functions.c} with header 
-    \textit{functions.h}. 
+    The program contains two parts: checking of input parameters and package 
+    aggregation by itself. The first part presents in \textit{sslsniff.c}. Also 
+    setup functions for aggregation are called there. The second part is represented 
+    in the file \textit{functions.c} with header \textit{functions.h}. 
 
     \subsection{Data structures}
     There are several auxiliary data structures for packet aggregation. 
@@ -168,22 +167,25 @@
      char *data;
  } extention;
     \end{lstlisting}
-    
-    This structure helps to go through extensions in SSL/TLS headers and find extension with SNI.
-    To check type of extension there are two element \textit{ext\_type\_hex} and \textit{ext\_type}.
-    First represents hexadecimal value of type and after conversion decimal value is stored in 
-    second element. Same idea is used for getting length of extension data. First extract hexadecimal
-    from corresponding position and store to array, then convert this array with hexadecimal values 
-    to decimal number. This solution is used because type and length of extension is stored on 2 bytes
-    both, so there is need to convert this to 2 bytes to one decimal value.
+     
+    This structure helps to go through extensions in SSL/TLS headers and find an 
+    extension with SNI. To check the type of an extension there are two elements: 
+    \textit{ext\_type\_hex} and \textit{ext\_type}. First represents the 
+    hexadecimal value of type and after conversion decimal value is stored in 
+    the second element. The same idea is used for getting the length of extension data. 
+    First extract hexadecimal from corresponding position and store to an array, 
+    then convert this array with hexadecimal values to decimal number. This 
+    solution is used because the type and length of the extension is stored on 2 bytes 
+    both, so there is a need to convert this to 2 bytes to one decimal value.
 
-    So, for getting SNI name there is loop through all extensions. In this loop there is \textit{if}
-    statement which checks type of extension and if it is equal to 0, then this extension would contain
-    SNI name in its data. In the end, if this type of extension presents, SNI is extracted and stored 
-    to corresponding element in TLS connection structure.
+    So, for extracting the SNI name there is a loop through all extensions. In this
+    loop, there is \textit{if} statement which checks the type of extension, and if it
+    is equal to 0, then this extension would contain SNI name in its data. In the
+    end, if this type of extension presents, SNI is extracted and stored to the
+    corresponding element in TLS connection structure.
     
     \subsection{TLS connection}
-    Each SSL/TLS connection is represented by following structure
+    Each SSL/TLS connection is represented by the following structure
     \begin{lstlisting}[language=C]
  typedef struct tls_conn{
      u_int src_ip, dst_ip;
@@ -200,40 +202,45 @@
  } tls_connection;
     \end{lstlisting}
 
-    There are source and destination IP addresses in integer format. The reason for storing addresses 
-    in integer format is that comparing of integers is faster that comparing of strings. Conversion 
-    to human ridable format is made only when result of aggregation should be written to standard 
-    output. Also for detecting that packet is corresponds to given connection there are source and
-    destination ports. 
+    There are the source and destination IP addresses in integer format. The 
+    reason for storing addresses in an integer format is that comparing integers
+    is faster than comparing strings. Conversion to human ridable format is 
+    made only when the result of aggregation should be written to standard output. 
+    Also, for detecting that packet is corresponds to a given connection there 
+    are source and destination ports. 
 
-    For aggregation purpose there are elements for storing amount of packets in given connection,
-    duration and bytes. Durations of connections is founded as result of subtraction \textit{timestamp} 
-    (represents timestamp of first packet aggregated in given connection) and timestamp of new packet
-    for corresponding connection. For subsection of timestamps there is function \textit{time\_diff} 
+    For aggregation purposes, there are elements for storing the number of packets
+    in given connection, duration, and bytes. Durations of connections is founded 
+    as a result of subtraction \textit{timestamp} (represents timestamp of the first 
+    packet aggregated in given connection) and timestamp of a new packet for 
+    corresponding connection. For subsection of timestamps, there is function 
+    \textit{time\_diff} 
 
     For interface aggregation end of the communication is detected based on flags 
-    \textit{server\_fin, server\_ack, client\_ack, client\_fin, last\_ack}. This flags corresponds 
-    to TCP flags of given connection. Connection is considered closed when flag \textit{last\_ack} 
-    is set to \textit{True}. This happens when all of flags \textit{server\_fin, server\_ack, 
-    client\_ack, client\_fin} also have value \textit{True}. 
+    \textit{server\_fin, client\_fin}, and \textit{last\_ack}. These flags correspond 
+    to TCP flags of a given connection. The connection is considered closed when 
+    flag \textit{last\_ack} is set to \textit{True}. This happens when all of 
+    flags \textit{server\_fin} and \textit{client\_fin} also have value \textit{True}. 
 
-    As doubly linked list is used, then there are also pointers to next element (connection) and 
-    previous. 
+    As a doubly linked list is used, then there are also pointers to the next 
+    element (connection) and previous. 
 
-    On step of input validation \textit{cleanup} function is set to be triggered on signal 
-    \textit{SIGINT}. This step is necessary for interface aggregation. Processing of live connection 
-    is not limited, so this setup insures that data will be freed of interruption.
+    On the step of input validation, the \textit{cleanup} function is set to be 
+    triggered on signal \textit{SIGINT}. This step is necessary for interface 
+    aggregation. Processing of live connection is not limited, so this setup 
+    insure that data will be freed of interruption.
 
     \section{Problems and limitations}
     \subsection{CPU usage}
-    There is problem where in 1 from 10 runnings after random amount of packets program would 
-    load one core up to 100\% and stop writing logs to standard output. Reason of this wight be 
-    some infinite loop in code, but this problem isn't solved.  
+    There is a problem that in 1 from 10 runs of interface aggregation after a 
+    random amount of packets program would load one core up to 100\% and stop 
+    writing logs to standard output. The reason for this might be some infinite 
+    loop in code, but this problem isn't solved.  
 
     \subsection{Performance}
-    As for storing data during aggregation doubly linked list is used, with big amount of 
-    live connection or on long runs performance of application is going down due to searching
-    time in data structure.
+    As for storing data during aggregation doubly linked list is used, with a 
+    big amount of live connection or on long runs performance of an application 
+    is going down due to searching time in the data structure.
 
     \newpage
     \nocite{*}

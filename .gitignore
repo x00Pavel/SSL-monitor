@@ -1,9 +1,3 @@
-sslsniff
-test_long.pcapng
-test_one.pcapng
-test_short.pcapng
-test.pcap
-test.pcapng
 .vscode/launch.json
 .vscode/settings.json
 .vscode/tasks.json
@@ -17,4 +11,7 @@ docs/manual.toc
 result.txt
 test_long2.pcapng
 docs/*
-test/*
+*test*
+isa*
+diffs*
+*.tar

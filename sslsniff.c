@@ -1,3 +1,9 @@
+/**
+ * @short Main program
+ * @file sslsniff.c
+ * @author Pavel Yadlouski (xadlo00)
+ */ 
+
 #include <getopt.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -39,23 +45,18 @@ int main(int argc, char *argv[]) {
                 if (handler == NULL) {
                     return 1;
                 }
-                logger(2, "Interface is set");
-                // start_listen(handler);
                 pthread_create(&tid_iface, NULL, start_listen, handler);
                 break;
             case 'r':
                 if (optarg == NULL) {
-                    printf("No file is set, quite\n");
+                    logger(1, "No file is set, quite\n");
                     return 0;
                 }
                 rc = check_file(optarg);
                 if (rc != 0) {
                     return rc;
                 }
-                logger(2, "File is set");
                 pthread_create(&tid_file, NULL, process_file, optarg);
-
-                // process_file(optarg);
                 break;
             default:
                 printf("Argument for %c is ignored", c);

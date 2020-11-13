@@ -4,6 +4,9 @@ MODULES=sslsniff.c functions.c
 make:
 	gcc -g $(CFLAGS) $(MODULES) -o sslsniff -lpcap -lpthread
 
+debug:
+	gcc -g $(CFLAGS) $(MODULES) -o sslsniff -lpcap -lpthread -D DEBUG
+
 clean:
 	rm sslsniff
 
@@ -13,5 +16,3 @@ run:
 run_s:
 	./sslsniff -r test_short.pcapng
 
-dev:
-	gcc -static -g $(CFLAGS) $(MODULES) -o sslsniff -lpcap -lpthread -D DEBUG
