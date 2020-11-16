@@ -56,7 +56,7 @@
         \begin{center}
             \vspace*{1cm}
     
-            \Large{\textbf{Project IIS}}
+            \Large{\textbf{Project ISA}}
     
             \vspace{0.5cm}
             Monitoring of SSL connection
@@ -79,7 +79,7 @@
     \newpage
 
     \section{Introduction}
-    This project aims is to create simple CLI application, that can monitor SSL communication.
+    This project aims to create simple CLI application, that can monitor SSL communication.
     Here monitoring means to aggregate input file \textbf{and/or} given network interface.  
         
 
@@ -106,11 +106,14 @@
     aggregation is completed. If the interface is set, then the program starts 
     listening on the given interface and aggregate incoming packets. When the 
     last packet of any connection is aggregated, then the result of the 
-    aggregation for this particular connection would be written to the standard output. 
+    aggregation for this particular connection would be written to the standard 
+    output. In both cases connection is marked as closed and written to standard
+    output if a structure of the connection contains valid SNI attribute and 
+    two FIN (from the client and from the server)  
 
     \subsection{Storing connections}
     As data structure for storing connections information doubly linked list is used.
-    This data structure was chosen for its simplicity of implementation and use. 
+    This data structure was chosen for its simplicity in implementation and use. 
     Also, despite the hash table, the doubly linked list very flexible from the 
     memory usage point of view: the doubly linked list doesn't have a fixed size, 
     so can grow as much as it would be necessary. The case of resizing the hash 
@@ -118,11 +121,11 @@
     doesn't have this problem. There just insert to any side of the list. Also as 
     each element of the list has a pointer to previous and next elements, then 
     deleting of an element is quite trivial: reset pointers between siblings of 
-    given connection and delete it.
+    given connection and delete the required one.
 
-    The biggest disadvantage of a doubly linked list is high searching complexity.
-    For every package whole list can be looked through. But in this application 
-    it is not significant, because is very simple. 
+    The biggest disadvantage of a doubly linked list is high (\textit{O(n)}) 
+    searching complexity.For every package whole list can be looked through. 
+    But in this application it is not significant, because is very simple. 
 
     \subsection{Packet processing}
 
@@ -130,14 +133,12 @@
     as the first element in the list. After that for every packet would be found 
     a corresponding entry in the list (based on comparing source and destination 
     IP addresses and ports). If the entry doesn't exist, then this packet would 
-    be inserted at the beginning of the list by setting up links for the next 
-    and previous entries.
+    be inserted at the beginning of the list with corresponding linking with next
+    element of the list.
     
-    When processing a file, any packet wouldn't be deleted from the list during 
-    the process. Because we don't know if later in the file there are no more 
-    packets that correspond to this particular entry. But during aggregation 
-    of the interface, every finished connection (based on TCP flags) is freed 
-    from the list.
+    Entry for connection is deleted from the list as soon as connection is closed
+    (has valid SNI and two FIN flags). With file aggregation, after process of
+    aggregation is ended, then list is freed. 
 
 
     \subsection{Multithreading}
@@ -152,7 +153,6 @@
     setup functions for aggregation are called there. The second part is represented 
     in the file \textit{functions.c} with header \textit{functions.h}. 
 
-    \subsection{Data structures}
     There are several auxiliary data structures for packet aggregation. 
 
     \subsection{TLS extensions}
@@ -189,6 +189,7 @@
     \begin{lstlisting}[language=C]
  typedef struct tls_conn{
      u_int src_ip, dst_ip;
+     struct in6_addr ip6_src, ip6_dst;
      u_int16_t src_port, dst_port;
      struct timeval timestamp;
      double duration;
@@ -196,15 +197,16 @@
      u_int packet_count;
      u_int bytes;
      u_int addr_size;
-     bool server_fin, server_ack, client_ack, client_fin;
-     bool last_ack;
+     bool server_fin, client_fin, last_ack;
      struct tls_conn *prev, *next;
  } tls_connection;
     \end{lstlisting}
 
-    There are the source and destination IP addresses in integer format. The 
+    There are the source and destination IP addresses in integer format (for IPv4) 
+    and in \textit{ip6\_addr} structure (for IPv6). The 
     reason for storing addresses in an integer format is that comparing integers
-    is faster than comparing strings. Conversion to human ridable format is 
+    is faster than comparing strings. For comparing IPv6 addresses there is a loop 
+    through each byte of address Conversion to human ridable format is 
     made only when the result of aggregation should be written to standard output. 
     Also, for detecting that packet is corresponds to a given connection there 
     are source and destination ports. 
@@ -231,8 +233,11 @@
     insure that data will be freed of interruption.
 
     \section{Problems and limitations}
+    \subsection{TCP reassembling}
+    Reassembling of TCP packets is not implemented.
+    
     \subsection{CPU usage}
-    There is a problem that in 1 from 10 runs of interface aggregation after a 
+    There is a problem that in 1 from cca 10 runs of interface aggregation after a 
     random amount of packets program would load one core up to 100\% and stop 
     writing logs to standard output. The reason for this might be some infinite 
     loop in code, but this problem isn't solved.  
@@ -241,6 +246,7 @@
     As for storing data during aggregation doubly linked list is used, with a 
     big amount of live connection or on long runs performance of an application 
     is going down due to searching time in the data structure.
+
 
     \newpage
     \nocite{*}
