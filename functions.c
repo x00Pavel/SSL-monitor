@@ -21,19 +21,14 @@
 #define SIZE 10
 
 typedef struct {
-    char ext_type_hex[5];
-    unsigned int ext_type;
-    char ext_len_hex[5];
-    unsigned int ext_len;
+    u_int16_t ext_type;
+    u_int16_t ext_len;
     char *data;
 } extention;
 
 typedef struct {
-    uint8_t type_hex;
-    char version_hex[5];
-    unsigned int version;
-    char len_hex[5];
-    unsigned int len;
+    u_int8_t type;
+    u_int16_t len;
     char *data;
 } tls_header;
 
@@ -47,7 +42,7 @@ typedef struct tls_conn {
     u_int packet_count;
     u_int bytes;
     u_int addr_size;
-    bool server_fin, client_fin, last_ack;
+    bool server_fin, client_fin, last_ack, rst;
     struct tls_conn *prev, *next;
 } tls_connection;
 
@@ -81,7 +76,7 @@ void logger(int type, void *msg) {
                 inet_ntop(AF_INET, &(pp->src_ip), source_ip, pp->addr_size);
                 inet_ntop(AF_INET, &(pp->dst_ip), dest_ip, pp->addr_size);
             }
-            fprintf(stdout, "%s.%06ld,%s,%d,%s,%s,%d,%d,%f\n", tmp,
+            fprintf(stdout, "%s.%06ld,%s,%d,%s,%s,%d,%d,%.03f\n", tmp,
                     pp->time_stamp.tv_usec, source_ip, ntohs(pp->src_port),
                     dest_ip, pp->sni, pp->bytes, pp->packet_count,
                     pp->duration);
@@ -180,8 +175,9 @@ double time_diff(struct timeval x, struct timeval y) {
  * @param client If preprocess from the client point of view
  * @param fin fin flag of current packet
  */
-void preprocess_packet(tls_connection *pp, bool client, uint16_t fin) {
-    if (fin) {
+void preprocess_packet(tls_connection *pp, bool client,
+                       const struct tcphdr *tcp) {
+    if (tcp->fin) {
         if (client) {
             pp->client_fin = true;
         } else {
@@ -191,6 +187,10 @@ void preprocess_packet(tls_connection *pp, bool client, uint16_t fin) {
     // If it is really the last packet in TCP connection
     else if (pp->client_fin && pp->server_fin) {
         pp->last_ack = true;
+    }
+    // printf("res1: %d res2: %d rst: %d\n", tcp->res1, tcp->res2, tcp->rst);
+    if (tcp->rst) {
+        pp->rst = true;
     }
     if (!pp->last_ack) {
         pp->packet_count++;
@@ -272,12 +272,12 @@ tls_connection *get_conn_6(const struct ip6_hdr *ip6_header,
         if (pp->addr_size == INET6_ADDRSTRLEN) {
             // From the clint side
             if (compare_addr(pp, ip6_header, false, true, tcp_header)) {
-                preprocess_packet(pp, true, tcp_header->fin);
+                preprocess_packet(pp, true, tcp_header);
                 return pp;
             }
             // From the server side
             else if (compare_addr(pp, ip6_header, false, false, tcp_header)) {
-                preprocess_packet(pp, false, tcp_header->fin);
+                preprocess_packet(pp, false, tcp_header);
                 return pp;
             }
         }
@@ -297,15 +297,31 @@ tls_connection *get_conn(const struct iphdr *ip_header,
     tls_connection *pp = connections;
     while (pp != NULL) {
         if (compare_addr(pp, ip_header, true, true, tcp_header)) {
-            preprocess_packet(pp, true, tcp_header->fin);
+            preprocess_packet(pp, true, tcp_header);
             return pp;
         } else if (compare_addr(pp, ip_header, true, false, tcp_header)) {
-            preprocess_packet(pp, false, tcp_header->fin);
+            preprocess_packet(pp, false, tcp_header);
             return pp;
         }
         pp = pp->next;
     }
     return NULL;
+}
+
+/**
+ * Convert two bytes to u_int16_t based on system byte order
+ * 
+ * @param x first byte (next is x + 1)
+ * 
+ * @return value of u_int16_t type
+ */
+u_int16_t get_uint_16(u_int8_t *x){
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    u_int8_t tmp[2] = {*(x + 1), *x};
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    u_int8_t tmp[2] = {*x, *(x + 1)};
+#endif
+    return *(u_int16_t *)tmp;
 }
 
 /**
@@ -321,17 +337,16 @@ tls_connection *get_conn(const struct iphdr *ip_header,
 void process_tls(tls_connection *pp, u_char *payload, size_t size_of_data) {
     tls_header tls_header;
     for (u_char *j = payload; j < (payload + size_of_data);
-         j += tls_header.len + 4) {
-        tls_header.type_hex = *j;
-        snprintf(tls_header.version_hex, 5, "%02x%02x", *(j + 1), *(j + 2));
-        sscanf(tls_header.version_hex, "%04x", &tls_header.version);
-        snprintf(tls_header.len_hex, 5, "%02x%02x", *(j + 3), *(j + 4));
-        sscanf(tls_header.len_hex, "%04x", &tls_header.len);
+         j += tls_header.len + 5) {
+        tls_header.type = *j;
 
-        if (tls_header.type_hex == 22) {
-            char len_hex[5];
+        tls_header.len = get_uint_16(j + 3);
+        if (tls_header.type == 22) {
             uint8_t *handshake_type = payload + 5;
             if (*handshake_type == 1) {
+                u_int16_t all_ext_len;
+                u_int16_t sni_length;
+
                 uint8_t *session_id_len = handshake_type + 38;
                 uint8_t cipher_suites_length =
                     *(session_id_len + *session_id_len + 1) +
@@ -340,30 +355,26 @@ void process_tls(tls_connection *pp, u_char *payload, size_t size_of_data) {
                     session_id_len + *session_id_len + 3 + cipher_suites_length;
 
                 extention ext;
-                unsigned int sni_length;
 
                 // Get size of all extansions
-                unsigned int all_ext_len;
 
                 // Take pointer to the first extantion
                 u_char *extenstions =
                     compress_method_len + *compress_method_len + 3;
 
-                snprintf(len_hex, 5, "%02x%02x",
-                        *(compress_method_len + *compress_method_len + 1),
-                        *(compress_method_len + *compress_method_len + 2));
-                sscanf(len_hex, "%04x", &all_ext_len);
+                all_ext_len = get_uint_16(compress_method_len + *compress_method_len + 1);
+
                 // Find Client Hello
                 for (u_char *i = extenstions; i < (extenstions + all_ext_len);
                      i += ext.ext_len + 4) {
                     // Convert hex values to decimal
-                    snprintf(ext.ext_type_hex, 5, "%02x%02x", *i, *(i + 1));
-                    sscanf(ext.ext_type_hex, "%04x", &ext.ext_type);
-                    snprintf(ext.ext_len_hex, 5, "%02x%02x", *(i + 2), *(i + 3));
-                    sscanf(ext.ext_len_hex, "%04x", &ext.ext_len);
+                    ext.ext_type = get_uint_16(i);
+
+                    ext.ext_len = get_uint_16(i + 2);
+
                     if (ext.ext_type == 0) {  // 0 - Client hello
-                        snprintf(len_hex, 5, "%02x%02x", *(i + 7), *(i + 8));
-                        sscanf(len_hex, "%04x", &sni_length);
+                        sni_length = get_uint_16(i + 7);
+
                         pp->sni = (char *)malloc(sni_length + 3);
                         snprintf(pp->sni, sni_length + 1, "%s\n",
                                  (char *)i + 9);
@@ -372,10 +383,10 @@ void process_tls(tls_connection *pp, u_char *payload, size_t size_of_data) {
                 }
             }
         }
-
-        if ((tls_header.type_hex >= 20) && (tls_header.type_hex <= 23)) {
+        if ((tls_header.type >= 20) && (tls_header.type <= 23)) {
             pp->bytes += tls_header.len;
         }
+
     }
 }
 
@@ -420,6 +431,7 @@ tls_connection *create_conn(const void *ip_header, bool ipv4,
     conn->server_fin = false;
     conn->client_fin = false;
     conn->last_ack = false;
+    conn->rst = false;
     return conn;
 }
 
@@ -446,17 +458,33 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkt_hdr,
     u_char *data;
 
     ethernet_header = (struct ether_header *)packet;
-    int type = ntohs(ethernet_header->ether_type);
+    u_int16_t type = ntohs(ethernet_header->ether_type);
     tls_connection *conn;
     size_t size = 0;
+    bool vlan = false;
+    if (type == ETHERTYPE_VLAN) {
+        vlan = true;
+        type = get_uint_16((u_int8_t*)(packet + sizeof(struct ether_header) + 2));
+    }
     if (type == ETHERTYPE_IP) {
         // Create IPv4 connection entry
-        ip_header = (struct iphdr *)(packet + sizeof(struct ether_header));
-        tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) +
-                                       sizeof(struct iphdr));
+        if (vlan) {
+            ip_header =
+                (struct iphdr *)(packet + sizeof(struct ether_header) + 4);
+            tcp_header =
+                (struct tcphdr *)(packet + sizeof(struct ether_header) + 4 +
+                                  sizeof(struct iphdr));
+            size = sizeof(struct ethhdr) +
+                   4 * (ip_header->ihl + tcp_header->doff + 1);
+        } 
+        else {
+            ip_header = (struct iphdr *)(packet + sizeof(struct ether_header));
+            tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) + sizeof(struct iphdr));
+            size =
+                sizeof(struct ethhdr) + 4 * (ip_header->ihl + tcp_header->doff);
+        }
+
         conn = get_conn(ip_header, tcp_header);
-        size =
-            sizeof(struct ethhdr) + ip_header->ihl * 4 + tcp_header->doff * 4;
         if (conn == NULL) {
             // If conenction is not present, then create a new one
             conn = create_conn(ip_header, true, tcp_header, pkt_hdr->ts);
@@ -464,28 +492,41 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkt_hdr,
         }
     } else if (type == ETHERTYPE_IPV6) {
         // Create IPv6 connection entry
-        ip6_header = (struct ip6_hdr *)(packet + sizeof(struct ether_header));
-
-        tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) +
-                                       sizeof(struct ip6_hdr));
+        if (vlan) {
+            ip6_header =
+                (struct ip6_hdr *)(packet + sizeof(struct ether_header) + 4);
+            tcp_header =
+                (struct tcphdr *)(packet + sizeof(struct ether_header) + 4 +
+                                  sizeof(struct ip6_hdr));
+            size = sizeof(struct ethhdr) + ip6_header->ip6_plen * 4 +
+                   tcp_header->doff * 4 + 4;
+        } 
+        else {
+            ip6_header =
+                (struct ip6_hdr *)(packet + sizeof(struct ether_header));
+            tcp_header = (struct tcphdr *)(packet + sizeof(struct ether_header) + sizeof(struct ip6_hdr));
+            size = sizeof(struct ethhdr) + ip6_header->ip6_plen * 4 +
+                   tcp_header->doff * 4;
+        }
 
         conn = get_conn_6(ip6_header, tcp_header);
-        size = sizeof(struct ethhdr) + ip6_header->ip6_plen * 4 +
-               tcp_header->doff * 4;
         if (conn == NULL) {
             // If conenction is not present, then create a new one
             conn = create_conn(ip6_header, false, tcp_header, pkt_hdr->ts);
             insert_conn(conn);
         }
+    } else {
+        return;
     }
 
-    if (conn->last_ack) {
+    if (conn->last_ack || conn->rst) {
         conn->duration = time_diff(pkt_hdr->ts, conn->time_stamp);
         logger(2, conn);
         delete_conn(conn);
-    }
-    else{
-        size_t size_of_data = pkt_hdr->len - size;
+    } else {
+        size_t size_of_data = 0;
+        size_of_data = pkt_hdr->len - size;
+
         if (size_of_data > 0) {
             data = (u_char *)(packet + size);
             process_tls(conn, data, size_of_data);
@@ -505,7 +546,8 @@ void *start_listen(void *p) {
         logger(1, err_buff);
     }
 
-    if (pcap_compile(handler, &prog, "tcp", 0, PCAP_NETMASK_UNKNOWN) == 1) {
+    if (pcap_compile(handler, &prog, "tcp or vlan", 0, PCAP_NETMASK_UNKNOWN) ==
+        1) {
         logger(1, "Filter can't be created");
         logger(1, pcap_geterr(handler));
     }
@@ -533,7 +575,7 @@ void *process_file(void *p) {
         logger(1, err_buff);
     }
 
-    if (pcap_compile(fp, &prog, "tcp", 0, PCAP_NETMASK_UNKNOWN) == -1) {
+    if (pcap_compile(fp, &prog, "tcp or vlan", 0, PCAP_NETMASK_UNKNOWN) == -1) {
         logger(1, "Filter can't be created");
         logger(1, pcap_geterr(fp));
     }
@@ -546,7 +588,6 @@ void *process_file(void *p) {
     if (pcap_loop(fp, 0, packet_handler, NULL) < 0) {
         logger(1, pcap_geterr(fp));
     }
-
     // Print all aggregated packages
     tls_connection *conn = connections;
     while (conn != NULL) {

@@ -159,26 +159,39 @@
     For processing SSL/TLS extensions there is following structure
     \lstset{style=mystyle}
     \begin{lstlisting}[language=C]
- typedef struct {
-     char ext_type_hex[5];
-     unsigned int ext_type;
-     char ext_len_hex[5];
-     unsigned int ext_len;
-     char *data;
- } extention;
-    \end{lstlisting}
+typedef struct {
+    u_int16_t ext_type;
+    u_int16_t ext_len;
+    char *data;
+} extention;
+\end{lstlisting}
      
     This structure helps to go through extensions in SSL/TLS headers and find an 
-    extension with SNI. To check the type of an extension there are two elements: 
-    \textit{ext\_type\_hex} and \textit{ext\_type}. First represents the 
-    hexadecimal value of type and after conversion decimal value is stored in 
-    the second element. The same idea is used for getting the length of extension data. 
-    First extract hexadecimal from corresponding position and store to an array, 
-    then convert this array with hexadecimal values to decimal number. This 
-    solution is used because the type and length of the extension is stored on 2 bytes 
-    both, so there is a need to convert this to 2 bytes to one decimal value.
+    extension with SNI. 
+    To check the type of an extension there is an element \textit{ext\_type}. 
+    This value is extracted from the byte stream from corresponding position. 
+    Type of extension contains 16 bits, so there is need to convert two following 
+    bits, taking into account system byte order. For this purposes (creating 
+    unsigned int of 16 bits) there is a function \textit{get\_uint\_16}
+    \begin{lstlisting}[language=C]
+u_int16_t get_uint_16(u_int8_t *x){
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    u_int8_t tmp[2] = {*(x + 1), *x};
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    u_int8_t tmp[2] = {*x, *(x + 1)};
+#endif
+    return *(u_int16_t *)tmp;
+}
+\end{lstlisting}
 
-    So, for extracting the SNI name there is a loop through all extensions. In this
+    This functions is used whenever we need to convert two following bytes to 
+    one value with the right byte order.
+    Attribute \textit{ext\_len} is used in \textit{for} loop as dynamic step. \
+    It is also created with function \textit{get\_uint\_16}. Data of extension
+    are stored in \textit{data} attribute.
+
+    So, for extracting the SNI name there is a \textit{for} loop with step 
+    \textit{ext\_len} through all extensions. In this
     loop, there is \textit{if} statement which checks the type of extension, and if it
     is equal to 0, then this extension would contain SNI name in its data. In the
     end, if this type of extension presents, SNI is extracted and stored to the
@@ -200,11 +213,11 @@
      bool server_fin, client_fin, last_ack;
      struct tls_conn *prev, *next;
  } tls_connection;
-    \end{lstlisting}
+\end{lstlisting}
 
     There are the source and destination IP addresses in integer format (for IPv4) 
-    and in \textit{ip6\_addr} structure (for IPv6). The 
-    reason for storing addresses in an integer format is that comparing integers
+    and in \textit{ip6\_addr} structure (for IPv6). 
+    The reason for storing addresses in an integer format is that comparing integers
     is faster than comparing strings. For comparing IPv6 addresses there is a loop 
     through each byte of address Conversion to human ridable format is 
     made only when the result of aggregation should be written to standard output. 
