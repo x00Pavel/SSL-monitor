@@ -1,8 +1,15 @@
+#      AUTHOR: Pavel Yadlouski (xyadlo00)
+#        FILE: Makefile
+# DESCRIPTION: Makefile for building SSL sniffer
+
 CFLAGS= -Wall -Wextra
 MODULES=sslsniff.c functions.c
 
 make:
-	gcc $(CFLAGS) $(MODULES) -o sslsniff -lpcap -lpthread
+	gcc -g $(CFLAGS) $(MODULES) -o sslsniff -lpcap -lpthread
+
+debug:
+	gcc -g $(CFLAGS) $(MODULES) -o sslsniff -lpcap -lpthread -D DEBUG
 
 clean:
 	rm sslsniff
@@ -13,5 +20,5 @@ run:
 run_s:
 	./sslsniff -r test_short.pcapng
 
-dev:
-	gcc $(CFLAGS) $(MODULES) -o sslsniff -lpcap -lpthread -D DEBUG
+tar:
+	tar -cfv xyadlo00.tar functions.* sslsniff.c Makefile manual.pdf sslsniff.1

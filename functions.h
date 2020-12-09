@@ -1,8 +1,7 @@
 /**
- * \author Pavel Yadlouski (xyadlo00)
- * \date September, 2020
- * \brief Application for SSL monitoring 
- * \file functions.h  Header file for functions.c
+ * @short Application for SSL monitoring 
+ * @file functions.h  Header file for functions.c
+ * @author Pavel Yadlouski (xyadlo00)
  */
 
 #include <pcap.h>
@@ -22,4 +21,4 @@ pcap_t * check_iface(char*);
 int check_file(char*);
 void *start_listen(void *);
 void *process_file(void *);
-void clean_up(int dummy);
+void cleanup(int dummy);
